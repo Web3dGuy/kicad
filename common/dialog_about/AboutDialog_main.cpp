@@ -62,8 +62,8 @@ static void buildKicadAboutBanner( EDA_BASE_FRAME* aParent, ABOUT_APP_INFO& aInf
 
     /* Set title */
     wxString appName = Pgm().App().GetAppName();
-    if( appName == wxT( "kicad" ) || appName == wxT( "KiCad" ) )
-        appName = wxT( "KiCad (Web3dGuy Fork)" );
+    // Debug: Always show fork identifier for testing
+    appName = wxT( "KiCad (Web3dGuy Fork)" );
     aInfo.SetAppName( appName );
 
     /* KiCad build version */
