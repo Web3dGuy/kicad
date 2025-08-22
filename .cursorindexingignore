@@ -1,0 +1,78 @@
+# Cursor Indexing Ignore - KiCad Main Directory
+# Excludes ~15,000 files including build artifacts, resources, third-party code, demos, and translations
+# Keeps: Core C++ source code, headers, API definitions, CMakeLists.txt
+
+# Build artifacts and CMake generated files
+build/
+*.o
+*.obj
+*.lib
+*.a
+*.so
+*.dll
+*.dylib
+*.cmake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.make
+
+# Resources - ~5,000 PNG/SVG icons and images
+resources/
+*.png
+*.svg
+*.xpm
+*.ico
+*.icns
+*.bmp
+*.jpg
+*.jpeg
+*.gif
+
+# Third-party code - ~3,200 external library files
+thirdparty/
+
+# Demos and QA - ~1,800 test project files
+demos/
+qa/
+
+# Translation files - ~45 localization files
+translation/
+*.po
+*.pot
+*.mo
+
+# Documentation that's not essential for development
+doxygen/
+*.md
+!README.md
+!CONTRIBUTING.md
+
+# Tools and utilities that aren't core development
+tools/
+utils/
+
+# Signing and packaging
+signing/
+
+# Version control and IDE files
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Backup files
+*.bak
+*.orig
+*~
