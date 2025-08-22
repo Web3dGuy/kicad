@@ -418,12 +418,7 @@ bool PGM_BASE::InitPgm( bool aHeadless, bool aSkipPyInit, bool aIsUnitTest )
 
     // Init parameters for configuration
     App().SetVendorName(  wxT( "KiCad" ) );
-    
-    // Customize app name for fork identification
-    if( pgm_name == wxT( "kicad" ) )
-        App().SetAppName( wxT( "KiCad (Web3dGuy Fork)" ) );
-    else
-        App().SetAppName( pgm_name );
+    App().SetAppName( pgm_name );
 
     // Install some image handlers, mainly for help
     if( wxImage::FindHandler( wxBITMAP_TYPE_PNG ) == nullptr )
