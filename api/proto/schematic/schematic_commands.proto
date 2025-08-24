@@ -60,3 +60,16 @@ message CreateSchematicItemsResponse {
     repeated kiapi.common.types.KIID created_ids = 1;
     repeated string errors = 2;  // Any creation errors
 }
+
+// Draw wire between two points
+message DrawWire {
+    kiapi.common.types.DocumentSpecifier schematic = 1;
+    kiapi.common.types.Vector2 start_point = 2;
+    kiapi.common.types.Vector2 end_point = 3;
+    int32 width = 4;  // Optional wire width in internal units (default: 0 = use default)
+}
+
+message DrawWireResponse {
+    kiapi.common.types.KIID wire_id = 1;
+    string error = 2;  // Any error that occurred
+}

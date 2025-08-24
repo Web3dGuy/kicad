@@ -77,6 +77,10 @@ private:
     
     HANDLER_RESULT<schematic::commands::CreateSchematicItemsResponse> handleCreateSchematicItems(
             const HANDLER_CONTEXT<schematic::commands::CreateSchematicItems>& aCtx );
+    
+    // Phase 1A handlers
+    HANDLER_RESULT<schematic::commands::DrawWireResponse> handleDrawWire(
+            const HANDLER_CONTEXT<schematic::commands::DrawWire>& aCtx );
 
     SCH_EDIT_FRAME* m_frame;
 };

@@ -64,6 +64,11 @@ API_HANDLER_SCH::API_HANDLER_SCH( SCH_EDIT_FRAME* aFrame ) :
     registerHandler<schematic::commands::CreateSchematicItems,
                     schematic::commands::CreateSchematicItemsResponse>(
             &API_HANDLER_SCH::handleCreateSchematicItems );
+    
+    // Phase 1A handlers
+    registerHandler<schematic::commands::DrawWire,
+                    schematic::commands::DrawWireResponse>(
+            &API_HANDLER_SCH::handleDrawWire );
 }
 
 
@@ -539,6 +544,70 @@ API_HANDLER_SCH::handleCreateSchematicItems( const HANDLER_CONTEXT<schematic::co
         // Update connectivity
         m_frame->RecalculateConnections( nullptr, NO_CLEANUP );
     }
+    
+    return response;
+}
+
+
+HANDLER_RESULT<schematic::commands::DrawWireResponse>
+API_HANDLER_SCH::handleDrawWire( const HANDLER_CONTEXT<schematic::commands::DrawWire>& aCtx )
+{
+    if( !validateDocument( aCtx.Request.schematic() ) )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "Invalid schematic document" );
+        return tl::unexpected( e );
+    }
+    
+    schematic::commands::DrawWireResponse response;
+    
+    // Get the screen
+    SCH_SCREEN* screen = m_frame->GetScreen();
+    if( !screen )
+    {
+        response.set_error( "No active schematic screen" );
+        return response;
+    }
+    
+    // Create commit for undo/redo
+    SCH_COMMIT commit( m_frame );
+    
+    // Create a new wire (SCH_LINE)
+    std::unique_ptr<SCH_LINE> wire = std::make_unique<SCH_LINE>();
+    
+    // Set wire properties
+    wire->SetLayer( LAYER_WIRE );
+    
+    // Convert from API coordinates to internal units
+    VECTOR2I startPos( aCtx.Request.start_point().x_nm(), aCtx.Request.start_point().y_nm() );
+    VECTOR2I endPos( aCtx.Request.end_point().x_nm(), aCtx.Request.end_point().y_nm() );
+    
+    wire->SetStartPoint( startPos );
+    wire->SetEndPoint( endPos );
+    
+    // Set wire width if specified (0 = use default)
+    if( aCtx.Request.width() > 0 )
+    {
+        wire->SetLineWidth( aCtx.Request.width() );
+    }
+    
+    // Add to screen and commit
+    screen->Append( wire.get() );
+    commit.Add( wire.get(), screen );
+    
+    // Set the created wire ID in response
+    kiapi::common::types::KIID* wireId = response.mutable_wire_id();
+    wireId->set_value( wire->m_Uuid.AsStdString() );
+    
+    // Release ownership to the screen
+    wire.release();
+    
+    // Push the commit
+    commit.Push( _( "Draw wire via API" ) );
+    
+    // Update connectivity
+    m_frame->RecalculateConnections( nullptr, NO_CLEANUP );
     
     return response;
 }
