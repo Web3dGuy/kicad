@@ -23,6 +23,7 @@
 
 #include <api/api_handler_editor.h>
 #include <api/common/commands/editor_commands.pb.h>
+#include <api/schematic/schematic_commands.pb.h>
 #include <kiid.h>
 
 using namespace kiapi;
@@ -66,6 +67,16 @@ protected:
 private:
     HANDLER_RESULT<commands::GetOpenDocumentsResponse> handleGetOpenDocuments(
             const HANDLER_CONTEXT<commands::GetOpenDocuments>& aCtx );
+
+    // Proof of concept handlers
+    HANDLER_RESULT<schematic::commands::SchematicInfoResponse> handleGetSchematicInfo(
+            const HANDLER_CONTEXT<schematic::commands::GetSchematicInfo>& aCtx );
+    
+    HANDLER_RESULT<schematic::commands::GetSchematicItemsResponse> handleGetSchematicItems(
+            const HANDLER_CONTEXT<schematic::commands::GetSchematicItems>& aCtx );
+    
+    HANDLER_RESULT<schematic::commands::CreateSchematicItemsResponse> handleCreateSchematicItems(
+            const HANDLER_CONTEXT<schematic::commands::CreateSchematicItems>& aCtx );
 
     SCH_EDIT_FRAME* m_frame;
 };

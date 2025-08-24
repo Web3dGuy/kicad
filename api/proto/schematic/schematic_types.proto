@@ -73,3 +73,30 @@ message DirectiveLabel
   kiapi.common.types.Vector2 position = 2;
   Text                       text     = 3;
 }
+
+/// Represents a wire junction (connection point)
+message Junction
+{
+  kiapi.common.types.KIID    id       = 1;
+  kiapi.common.types.Vector2 position = 2;
+  int32                      diameter = 3;  // In nanometers
+  kiapi.common.types.Color   color    = 4;
+}
+
+/// Represents a wire segment (electrical connection)
+message Wire
+{
+  kiapi.common.types.KIID             id     = 1;
+  kiapi.common.types.Vector2          start  = 2;
+  kiapi.common.types.Vector2          end    = 3;
+  kiapi.common.types.StrokeAttributes stroke = 4;
+}
+
+/// Represents a bus segment
+message Bus
+{
+  kiapi.common.types.KIID             id     = 1;
+  kiapi.common.types.Vector2          start  = 2;
+  kiapi.common.types.Vector2          end    = 3;
+  kiapi.common.types.StrokeAttributes stroke = 4;
+}
