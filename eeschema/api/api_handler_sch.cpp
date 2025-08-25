@@ -323,7 +323,18 @@ void API_HANDLER_SCH::deleteItemsInternal( std::map<KIID, ItemDeletionStatus>& a
     
     for( auto& [id, status] : aItemsToDelete )
     {
-        EDA_ITEM* item = screen->GetItem( id );
+        EDA_ITEM* item = nullptr;
+        
+        // Find item by KIID
+        for( SCH_ITEM* screenItem : screen->Items() )
+        {
+            if( screenItem->m_Uuid == id )
+            {
+                item = screenItem;
+                break;
+            }
+        }
+        
         if( item )
         {
             commit.Remove( item, screen );
