@@ -482,8 +482,8 @@ API_HANDLER_SCH::handleGetSchematicItems( const HANDLER_CONTEXT<schematic::comma
             symbolMsg.mutable_position()->set_y_nm( pos.y );
             
             // Get reference and value fields
-            symbolMsg.set_reference( symbol->GetField( REFERENCE_FIELD )->GetText().ToStdString() );
-            symbolMsg.set_value( symbol->GetField( VALUE_FIELD )->GetText().ToStdString() );
+            symbolMsg.set_reference( symbol->GetField( FIELD_T::REFERENCE )->GetText().ToStdString() );
+            symbolMsg.set_value( symbol->GetField( FIELD_T::VALUE )->GetText().ToStdString() );
             
             // Get library ID
             symbolMsg.set_library_id( symbol->GetLibId().Format().ToStdString() );
@@ -494,7 +494,7 @@ API_HANDLER_SCH::handleGetSchematicItems( const HANDLER_CONTEXT<schematic::comma
             
             // Get orientation and mirroring
             int orientation = symbol->GetOrientation();
-            symbolMsg.mutable_orientation()->set_degrees( orientation );
+            symbolMsg.mutable_orientation()->set_value_degrees( orientation );
             
             // Note: GetTransform() gives us the complete transform matrix
             // For now, simplified mirroring detection
@@ -519,8 +519,8 @@ API_HANDLER_SCH::handleGetSchematicItems( const HANDLER_CONTEXT<schematic::comma
                 // Get electrical type
                 pinMsg->set_electrical_type( static_cast<schematic::types::PinElectricalType>( pin->GetType() ) );
                 
-                // Get orientation (0=right, 90=up, 180=left, 270=down)
-                pinMsg->set_orientation( pin->GetOrientation() );
+                // Get orientation (0=right, 90=up, 180=left, 270=down) - convert enum to int
+                pinMsg->set_orientation( static_cast<int32_t>( pin->GetOrientation() ) );
                 
                 // Get length
                 pinMsg->set_length( pin->GetLength() );
@@ -731,7 +731,7 @@ API_HANDLER_SCH::handleGetSymbolPins( const HANDLER_CONTEXT<schematic::commands:
     }
     
     // Set symbol info
-    response.set_reference( symbol->GetField( REFERENCE_FIELD )->GetText().ToStdString() );
+    response.set_reference( symbol->GetField( FIELD_T::REFERENCE )->GetText().ToStdString() );
     
     VECTOR2I symbolPos = symbol->GetPosition();
     response.mutable_symbol_position()->set_x_nm( symbolPos.x );
@@ -757,8 +757,8 @@ API_HANDLER_SCH::handleGetSymbolPins( const HANDLER_CONTEXT<schematic::commands:
         // Get electrical type
         pinMsg->set_electrical_type( static_cast<schematic::types::PinElectricalType>( pin->GetType() ) );
         
-        // Get orientation (0=right, 90=up, 180=left, 270=down)
-        pinMsg->set_orientation( pin->GetOrientation() );
+        // Get orientation (0=right, 90=up, 180=left, 270=down) - convert enum to int
+        pinMsg->set_orientation( static_cast<int32_t>( pin->GetOrientation() ) );
         
         // Get length
         pinMsg->set_length( pin->GetLength() );
