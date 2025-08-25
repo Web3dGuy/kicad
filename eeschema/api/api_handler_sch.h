@@ -81,6 +81,9 @@ private:
     // Phase 1A handlers
     HANDLER_RESULT<schematic::commands::DrawWireResponse> handleDrawWire(
             const HANDLER_CONTEXT<schematic::commands::DrawWire>& aCtx );
+    
+    HANDLER_RESULT<schematic::commands::GetSymbolPinsResponse> handleGetSymbolPins(
+            const HANDLER_CONTEXT<schematic::commands::GetSymbolPins>& aCtx );
 
     SCH_EDIT_FRAME* m_frame;
 };

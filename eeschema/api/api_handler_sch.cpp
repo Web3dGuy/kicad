@@ -33,6 +33,8 @@
 #include <sch_label.h>
 #include <sch_junction.h>
 #include <sch_line.h>
+#include <sch_pin.h>
+#include <sch_field.h>
 #include <wx/filename.h>
 
 #include <api/common/types/base_types.pb.h>
@@ -69,6 +71,10 @@ API_HANDLER_SCH::API_HANDLER_SCH( SCH_EDIT_FRAME* aFrame ) :
     registerHandler<schematic::commands::DrawWire,
                     schematic::commands::DrawWireResponse>(
             &API_HANDLER_SCH::handleDrawWire );
+    
+    registerHandler<schematic::commands::GetSymbolPins,
+                    schematic::commands::GetSymbolPinsResponse>(
+            &API_HANDLER_SCH::handleGetSymbolPins );
 }
 
 
@@ -448,14 +454,81 @@ API_HANDLER_SCH::handleGetSchematicItems( const HANDLER_CONTEXT<schematic::comma
     int count = 0;
     for( SCH_ITEM* item : screen->Items() )
     {
-        // Only handle simple items for POC
+        google::protobuf::Any* any = nullptr;
+        
+        // Handle different item types
         if( item->Type() == SCH_JUNCTION_T ||
             item->Type() == SCH_LINE_T ||
             item->Type() == SCH_LABEL_T )
         {
-            google::protobuf::Any any;
-            item->Serialize( any );
-            response.add_items()->CopyFrom( any );
+            any = response.add_items();
+            item->Serialize( *any );
+            count++;
+        }
+        else if( item->Type() == SCH_SYMBOL_T )
+        {
+            // Handle symbols specially - we need to extract position and other data
+            SCH_SYMBOL* symbol = static_cast<SCH_SYMBOL*>( item );
+            
+            // Create a Symbol protobuf message
+            schematic::types::Symbol symbolMsg;
+            
+            // Set basic properties
+            symbolMsg.mutable_id()->set_value( symbol->m_Uuid.AsStdString() );
+            
+            // Get position (already in nanometers internally)
+            VECTOR2I pos = symbol->GetPosition();
+            symbolMsg.mutable_position()->set_x_nm( pos.x );
+            symbolMsg.mutable_position()->set_y_nm( pos.y );
+            
+            // Get reference and value fields
+            symbolMsg.set_reference( symbol->GetField( REFERENCE_FIELD )->GetText().ToStdString() );
+            symbolMsg.set_value( symbol->GetField( VALUE_FIELD )->GetText().ToStdString() );
+            
+            // Get library ID
+            symbolMsg.set_library_id( symbol->GetLibId().Format().ToStdString() );
+            
+            // Get unit and body style
+            symbolMsg.set_unit( symbol->GetUnit() );
+            symbolMsg.set_body_style( symbol->GetBodyStyle() );
+            
+            // Get orientation and mirroring
+            int orientation = symbol->GetOrientation();
+            symbolMsg.mutable_orientation()->set_degrees( orientation );
+            
+            // Note: GetTransform() gives us the complete transform matrix
+            // For now, simplified mirroring detection
+            symbolMsg.set_mirrored_x( false );  // TODO: Extract from transform
+            symbolMsg.set_mirrored_y( false );  // TODO: Extract from transform
+            
+            // Get pins with their positions
+            std::vector<SCH_PIN*> pins = symbol->GetPins();
+            for( SCH_PIN* pin : pins )
+            {
+                schematic::types::Pin* pinMsg = symbolMsg.add_pins();
+                
+                pinMsg->mutable_id()->set_value( pin->m_Uuid.AsStdString() );
+                pinMsg->set_name( pin->GetName().ToStdString() );
+                pinMsg->set_number( pin->GetNumber().ToStdString() );
+                
+                // Get the physical position of the pin (accounts for symbol transform)
+                VECTOR2I pinPos = symbol->GetPinPhysicalPosition( pin );
+                pinMsg->mutable_position()->set_x_nm( pinPos.x );
+                pinMsg->mutable_position()->set_y_nm( pinPos.y );
+                
+                // Get electrical type
+                pinMsg->set_electrical_type( static_cast<schematic::types::PinElectricalType>( pin->GetType() ) );
+                
+                // Get orientation (0=right, 90=up, 180=left, 270=down)
+                pinMsg->set_orientation( pin->GetOrientation() );
+                
+                // Get length
+                pinMsg->set_length( pin->GetLength() );
+            }
+            
+            // Pack into Any
+            any = response.add_items();
+            any->PackFrom( symbolMsg );
             count++;
         }
     }
@@ -610,6 +683,86 @@ API_HANDLER_SCH::handleDrawWire( const HANDLER_CONTEXT<schematic::commands::Draw
     
     // Update connectivity
     m_frame->RecalculateConnections( nullptr, NO_CLEANUP );
+    
+    return response;
+}
+
+
+HANDLER_RESULT<schematic::commands::GetSymbolPinsResponse>
+API_HANDLER_SCH::handleGetSymbolPins( const HANDLER_CONTEXT<schematic::commands::GetSymbolPins>& aCtx )
+{
+    if( !validateDocument( aCtx.Request.schematic() ) )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "Invalid schematic document" );
+        return tl::unexpected( e );
+    }
+    
+    schematic::commands::GetSymbolPinsResponse response;
+    
+    // Get the screen
+    SCH_SHEET_PATH currentSheet = m_frame->GetCurrentSheet();
+    SCH_SCREEN* screen = currentSheet.LastScreen();
+    
+    if( !screen )
+    {
+        response.set_error( "No active schematic screen" );
+        return response;
+    }
+    
+    // Find the symbol with the given ID
+    KIID symbolId( aCtx.Request.symbol_id().value() );
+    SCH_SYMBOL* symbol = nullptr;
+    
+    for( SCH_ITEM* item : screen->Items() )
+    {
+        if( item->Type() == SCH_SYMBOL_T && item->m_Uuid == symbolId )
+        {
+            symbol = static_cast<SCH_SYMBOL*>( item );
+            break;
+        }
+    }
+    
+    if( !symbol )
+    {
+        response.set_error( "Symbol not found" );
+        return response;
+    }
+    
+    // Set symbol info
+    response.set_reference( symbol->GetField( REFERENCE_FIELD )->GetText().ToStdString() );
+    
+    VECTOR2I symbolPos = symbol->GetPosition();
+    response.mutable_symbol_position()->set_x_nm( symbolPos.x );
+    response.mutable_symbol_position()->set_y_nm( symbolPos.y );
+    
+    // Get all pins for the symbol
+    std::vector<SCH_PIN*> pins = symbol->GetPins();
+    
+    for( SCH_PIN* pin : pins )
+    {
+        schematic::types::Pin* pinMsg = response.add_pins();
+        
+        // Set pin properties
+        pinMsg->mutable_id()->set_value( pin->m_Uuid.AsStdString() );
+        pinMsg->set_name( pin->GetName().ToStdString() );
+        pinMsg->set_number( pin->GetNumber().ToStdString() );
+        
+        // Get the physical position of the pin (accounts for symbol transform)
+        VECTOR2I pinPos = symbol->GetPinPhysicalPosition( pin );
+        pinMsg->mutable_position()->set_x_nm( pinPos.x );
+        pinMsg->mutable_position()->set_y_nm( pinPos.y );
+        
+        // Get electrical type
+        pinMsg->set_electrical_type( static_cast<schematic::types::PinElectricalType>( pin->GetType() ) );
+        
+        // Get orientation (0=right, 90=up, 180=left, 270=down)
+        pinMsg->set_orientation( pin->GetOrientation() );
+        
+        // Get length
+        pinMsg->set_length( pin->GetLength() );
+    }
     
     return response;
 }

@@ -100,3 +100,48 @@ message Bus
   kiapi.common.types.Vector2          end    = 3;
   kiapi.common.types.StrokeAttributes stroke = 4;
 }
+
+/// Electrical type of a schematic pin
+enum PinElectricalType
+{
+  PET_UNKNOWN = 0;
+  PET_INPUT = 1;
+  PET_OUTPUT = 2;
+  PET_BIDIRECTIONAL = 3;
+  PET_TRI_STATE = 4;
+  PET_PASSIVE = 5;
+  PET_UNSPECIFIED = 6;
+  PET_POWER_IN = 7;
+  PET_POWER_OUT = 8;
+  PET_OPEN_COLLECTOR = 9;
+  PET_OPEN_EMITTER = 10;
+  PET_NO_CONNECT = 11;
+}
+
+/// Represents a pin on a schematic symbol
+message Pin
+{
+  kiapi.common.types.KIID    id                = 1;
+  string                      name              = 2;
+  string                      number            = 3;
+  kiapi.common.types.Vector2 position          = 4;  // Physical position on schematic (in nm)
+  PinElectricalType          electrical_type   = 5;
+  int32                      orientation       = 6;  // 0=right, 90=up, 180=left, 270=down
+  int32                      length            = 7;  // Pin length in nm
+}
+
+/// Represents a schematic symbol instance
+message Symbol
+{
+  kiapi.common.types.KIID    id                = 1;
+  kiapi.common.types.Vector2 position          = 2;  // Symbol origin position (in nm)
+  string                      reference         = 3;  // Reference designator (e.g., "R1", "U1")
+  string                      value             = 4;  // Value field text
+  string                      library_id        = 5;  // Library identifier (e.g., "Device:R")
+  int32                      unit              = 6;  // Unit number for multi-unit symbols
+  int32                      body_style        = 7;  // Alternate body style (De Morgan)
+  kiapi.common.types.Angle   orientation       = 8;  // Rotation angle
+  bool                       mirrored_x        = 9;  // Horizontal mirror
+  bool                       mirrored_y        = 10; // Vertical mirror
+  repeated Pin               pins              = 11; // Symbol's pins with positions
+}

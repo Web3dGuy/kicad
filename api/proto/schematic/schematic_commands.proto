@@ -24,6 +24,7 @@ package kiapi.schematic.commands;
 import "common/types/base_types.proto";
 import "common/types/enums.proto";
 import "google/protobuf/any.proto";
+import "schematic/schematic_types.proto";
 
 // Proof of Concept: Get basic schematic information
 message GetSchematicInfo {
@@ -72,4 +73,17 @@ message DrawWire {
 message DrawWireResponse {
     kiapi.common.types.KIID wire_id = 1;
     string error = 2;  // Any error that occurred
+}
+
+// Get pins for a specific symbol
+message GetSymbolPins {
+    kiapi.common.types.DocumentSpecifier schematic = 1;
+    kiapi.common.types.KIID symbol_id = 2;  // Symbol UUID to get pins for
+}
+
+message GetSymbolPinsResponse {
+    repeated kiapi.schematic.types.Pin pins = 1;  // List of pins with their positions
+    string reference = 2;  // Symbol reference (e.g., "D1", "BT1")
+    kiapi.common.types.Vector2 symbol_position = 3;  // Symbol origin position
+    string error = 4;  // Any error that occurred
 }
