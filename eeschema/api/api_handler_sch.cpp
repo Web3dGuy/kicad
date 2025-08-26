@@ -476,17 +476,17 @@ API_HANDLER_SCH::handleGetSchematicItems( const HANDLER_CONTEXT<schematic::comma
             // Set basic properties
             symbolMsg.mutable_id()->set_value( symbol->m_Uuid.AsStdString() );
             
-            // Get position (already in nanometers internally)
+            // Get position and convert from KiCad schematic internal units to nanometers (1 schematic IU = 100 nm)
             VECTOR2I pos = symbol->GetPosition();
-            symbolMsg.mutable_position()->set_x_nm( pos.x );
-            symbolMsg.mutable_position()->set_y_nm( pos.y );
+            symbolMsg.mutable_position()->set_x_nm( pos.x * 100 );
+            symbolMsg.mutable_position()->set_y_nm( pos.y * 100 );
             
             // Get reference and value fields
             symbolMsg.set_reference( symbol->GetField( FIELD_T::REFERENCE )->GetText().ToStdString() );
             symbolMsg.set_value( symbol->GetField( FIELD_T::VALUE )->GetText().ToStdString() );
             
             // Get library ID
-            symbolMsg.set_library_id( symbol->GetLibId().Format().ToStdString() );
+            symbolMsg.set_library_id( wxString( symbol->GetLibId().Format().wx_str() ).ToStdString() );
             
             // Get unit and body style
             symbolMsg.set_unit( symbol->GetUnit() );
@@ -513,8 +513,9 @@ API_HANDLER_SCH::handleGetSchematicItems( const HANDLER_CONTEXT<schematic::comma
                 
                 // Get the physical position of the pin (accounts for symbol transform)
                 VECTOR2I pinPos = symbol->GetPinPhysicalPosition( pin );
-                pinMsg->mutable_position()->set_x_nm( pinPos.x );
-                pinMsg->mutable_position()->set_y_nm( pinPos.y );
+                // Convert from KiCad schematic internal units to nanometers (1 schematic IU = 100 nm)
+                pinMsg->mutable_position()->set_x_nm( pinPos.x * 100 );
+                pinMsg->mutable_position()->set_y_nm( pinPos.y * 100 );
                 
                 // Get electrical type
                 pinMsg->set_electrical_type( static_cast<schematic::types::PinElectricalType>( pin->GetType() ) );
@@ -654,9 +655,9 @@ API_HANDLER_SCH::handleDrawWire( const HANDLER_CONTEXT<schematic::commands::Draw
     // Set wire properties
     wire->SetLayer( LAYER_WIRE );
     
-    // Convert from API coordinates to internal units
-    VECTOR2I startPos( aCtx.Request.start_point().x_nm(), aCtx.Request.start_point().y_nm() );
-    VECTOR2I endPos( aCtx.Request.end_point().x_nm(), aCtx.Request.end_point().y_nm() );
+    // Convert from API coordinates (nanometers) to internal units (1 schematic IU = 100 nm)
+    VECTOR2I startPos( aCtx.Request.start_point().x_nm() / 100, aCtx.Request.start_point().y_nm() / 100 );
+    VECTOR2I endPos( aCtx.Request.end_point().x_nm() / 100, aCtx.Request.end_point().y_nm() / 100 );
     
     wire->SetStartPoint( startPos );
     wire->SetEndPoint( endPos );
@@ -734,8 +735,9 @@ API_HANDLER_SCH::handleGetSymbolPins( const HANDLER_CONTEXT<schematic::commands:
     response.set_reference( symbol->GetField( FIELD_T::REFERENCE )->GetText().ToStdString() );
     
     VECTOR2I symbolPos = symbol->GetPosition();
-    response.mutable_symbol_position()->set_x_nm( symbolPos.x );
-    response.mutable_symbol_position()->set_y_nm( symbolPos.y );
+    // Convert from KiCad schematic internal units to nanometers (1 schematic IU = 100 nm)
+    response.mutable_symbol_position()->set_x_nm( symbolPos.x * 100 );
+    response.mutable_symbol_position()->set_y_nm( symbolPos.y * 100 );
     
     // Get all pins for the symbol
     std::vector<SCH_PIN*> pins = symbol->GetPins();
@@ -751,8 +753,9 @@ API_HANDLER_SCH::handleGetSymbolPins( const HANDLER_CONTEXT<schematic::commands:
         
         // Get the physical position of the pin (accounts for symbol transform)
         VECTOR2I pinPos = symbol->GetPinPhysicalPosition( pin );
-        pinMsg->mutable_position()->set_x_nm( pinPos.x );
-        pinMsg->mutable_position()->set_y_nm( pinPos.y );
+        // Convert from KiCad schematic internal units to nanometers (1 schematic IU = 100 nm)
+        pinMsg->mutable_position()->set_x_nm( pinPos.x * 100 );
+        pinMsg->mutable_position()->set_y_nm( pinPos.y * 100 );
         
         // Get electrical type
         pinMsg->set_electrical_type( static_cast<schematic::types::PinElectricalType>( pin->GetType() ) );
