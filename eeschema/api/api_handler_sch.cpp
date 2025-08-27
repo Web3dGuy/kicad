@@ -36,6 +36,9 @@
 #include <sch_pin.h>
 #include <sch_field.h>
 #include <wx/filename.h>
+#include <tool/tool_manager.h>
+#include <tools/sch_line_wire_bus_tool.h>
+#include <tools/sch_selection.h>
 
 #include <api/common/types/base_types.pb.h>
 #include <api/schematic/schematic_commands.pb.h>
@@ -511,8 +514,8 @@ API_HANDLER_SCH::handleGetSchematicItems( const HANDLER_CONTEXT<schematic::comma
                 pinMsg->set_name( pin->GetName().ToStdString() );
                 pinMsg->set_number( pin->GetNumber().ToStdString() );
                 
-                // Get the physical position of the pin (accounts for symbol transform)
-                VECTOR2I pinPos = symbol->GetPinPhysicalPosition( pin );
+                // Get the position of the pin (already transformed by SCH_PIN::GetPosition())
+                VECTOR2I pinPos = pin->GetPosition();
                 // Convert from KiCad schematic internal units to nanometers (1 schematic IU = 100 nm)
                 pinMsg->mutable_position()->set_x_nm( pinPos.x * 100 );
                 pinMsg->mutable_position()->set_y_nm( pinPos.y * 100 );
@@ -676,13 +679,32 @@ API_HANDLER_SCH::handleDrawWire( const HANDLER_CONTEXT<schematic::commands::Draw
     kiapi::common::types::KIID* wireId = response.mutable_wire_id();
     wireId->set_value( wire->m_Uuid.AsStdString() );
     
+    // Get tool manager for junction creation
+    TOOL_MANAGER* toolMgr = m_frame->GetToolManager();
+    SCH_LINE_WIRE_BUS_TOOL* lwbTool = toolMgr ? toolMgr->GetTool<SCH_LINE_WIRE_BUS_TOOL>() : nullptr;
+
+    // Store wire pointer before releasing ownership
+    SCH_LINE* wirePtr = wire.get();
+
     // Release ownership to the screen
     wire.release();
     
     // Push the commit
     commit.Push( _( "Draw wire via API" ) );
     
-    // Update connectivity
+    // Add junctions if needed (matching interactive tool behavior)
+    if( lwbTool )
+    {
+        SCH_COMMIT junctionCommit( m_frame );
+        SCH_SELECTION selection;
+        selection.Add( wirePtr );
+        
+        lwbTool->AddJunctionsIfNeeded( &junctionCommit, &selection );
+        if( junctionCommit.HasChanges() )
+            junctionCommit.Push( _( "Add junctions via API" ) );
+    }
+    
+    // Update connectivity after junction creation
     m_frame->RecalculateConnections( nullptr, NO_CLEANUP );
     
     return response;
@@ -751,8 +773,8 @@ API_HANDLER_SCH::handleGetSymbolPins( const HANDLER_CONTEXT<schematic::commands:
         pinMsg->set_name( pin->GetName().ToStdString() );
         pinMsg->set_number( pin->GetNumber().ToStdString() );
         
-        // Get the physical position of the pin (accounts for symbol transform)
-        VECTOR2I pinPos = symbol->GetPinPhysicalPosition( pin );
+        // Get the position of the pin (already transformed by SCH_PIN::GetPosition())
+        VECTOR2I pinPos = pin->GetPosition();
         // Convert from KiCad schematic internal units to nanometers (1 schematic IU = 100 nm)
         pinMsg->mutable_position()->set_x_nm( pinPos.x * 100 );
         pinMsg->mutable_position()->set_y_nm( pinPos.y * 100 );
