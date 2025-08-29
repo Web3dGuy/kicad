@@ -84,6 +84,15 @@ private:
     
     HANDLER_RESULT<schematic::commands::GetSymbolPinsResponse> handleGetSymbolPins(
             const HANDLER_CONTEXT<schematic::commands::GetSymbolPins>& aCtx );
+    
+    HANDLER_RESULT<schematic::commands::GetComponentBoundsResponse> handleGetComponentBounds(
+            const HANDLER_CONTEXT<schematic::commands::GetComponentBounds>& aCtx );
+    
+    HANDLER_RESULT<schematic::commands::GetGridAnchorsResponse> handleGetGridAnchors(
+            const HANDLER_CONTEXT<schematic::commands::GetGridAnchors>& aCtx );
+    
+    HANDLER_RESULT<schematic::commands::GetConnectionPointsResponse> handleGetConnectionPoints(
+            const HANDLER_CONTEXT<schematic::commands::GetConnectionPoints>& aCtx );
 
     SCH_EDIT_FRAME* m_frame;
 };

@@ -87,3 +87,50 @@ message GetSymbolPinsResponse {
     kiapi.common.types.Vector2 symbol_position = 3;  // Symbol origin position
     string error = 4;  // Any error that occurred
 }
+
+// Get component bounding box for collision detection
+message GetComponentBounds {
+    kiapi.common.types.DocumentSpecifier schematic = 1;
+    kiapi.common.types.KIID symbol_id = 2;  // Symbol UUID to get bounds for
+    bool include_pins = 3;  // Include pin extents in bounding box
+    bool include_fields = 4;  // Include field extents in bounding box
+}
+
+message GetComponentBoundsResponse {
+    kiapi.common.types.Vector2 top_left = 1;  // Bounding box top-left corner
+    kiapi.common.types.Vector2 bottom_right = 2;  // Bounding box bottom-right corner
+    string reference = 3;  // Symbol reference (e.g., "D1", "BT1")
+    string error = 4;  // Any error that occurred
+}
+
+// Get grid snap points for smart routing
+message GetGridAnchors {
+    kiapi.common.types.DocumentSpecifier schematic = 1;
+    kiapi.common.types.Vector2 position = 2;  // Position to find anchors near
+    int32 snap_range = 3;  // Search radius in nanometers
+    repeated kiapi.common.types.KIID skip_items = 4;  // Items to skip in search
+}
+
+message GetGridAnchorsResponse {
+    repeated GridAnchor anchors = 1;  // Available snap points
+    string error = 2;  // Any error that occurred
+}
+
+message GridAnchor {
+    kiapi.common.types.Vector2 position = 1;  // Anchor position
+    string type = 2;  // Anchor type (grid, pin, connection, etc.)
+    kiapi.common.types.KIID item_id = 3;  // Item this anchor belongs to (optional)
+    int32 distance = 4;  // Distance from requested position
+}
+
+// Get connection points for wire routing
+message GetConnectionPoints {
+    kiapi.common.types.DocumentSpecifier schematic = 1;
+    kiapi.common.types.Vector2 region_start = 2;  // Search region start (optional)
+    kiapi.common.types.Vector2 region_end = 3;    // Search region end (optional)
+}
+
+message GetConnectionPointsResponse {
+    repeated kiapi.common.types.Vector2 connections = 1;  // Available connection points
+    string error = 2;  // Any error that occurred
+}

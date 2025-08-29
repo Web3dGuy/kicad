@@ -40,6 +40,7 @@
 #include <tool/tool_manager.h>
 #include <tools/sch_line_wire_bus_tool.h>
 #include <tools/sch_selection.h>
+#include <tools/ee_grid_helper.h>
 
 #include <api/common/types/base_types.pb.h>
 #include <api/schematic/schematic_commands.pb.h>
@@ -79,6 +80,18 @@ API_HANDLER_SCH::API_HANDLER_SCH( SCH_EDIT_FRAME* aFrame ) :
     registerHandler<schematic::commands::GetSymbolPins,
                     schematic::commands::GetSymbolPinsResponse>(
             &API_HANDLER_SCH::handleGetSymbolPins );
+    
+    registerHandler<schematic::commands::GetComponentBounds,
+                    schematic::commands::GetComponentBoundsResponse>(
+            &API_HANDLER_SCH::handleGetComponentBounds );
+    
+    registerHandler<schematic::commands::GetGridAnchors,
+                    schematic::commands::GetGridAnchorsResponse>(
+            &API_HANDLER_SCH::handleGetGridAnchors );
+    
+    registerHandler<schematic::commands::GetConnectionPoints,
+                    schematic::commands::GetConnectionPointsResponse>(
+            &API_HANDLER_SCH::handleGetConnectionPoints );
 }
 
 
@@ -798,6 +811,186 @@ API_HANDLER_SCH::handleGetSymbolPins( const HANDLER_CONTEXT<schematic::commands:
         
         // Get length
         pinMsg->set_length( pin->GetLength() );
+    }
+    
+    return response;
+}
+
+
+HANDLER_RESULT<schematic::commands::GetComponentBoundsResponse>
+API_HANDLER_SCH::handleGetComponentBounds( const HANDLER_CONTEXT<schematic::commands::GetComponentBounds>& aCtx )
+{
+    if( !validateDocument( aCtx.Request.schematic() ) )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "Invalid schematic document" );
+        return tl::unexpected( e );
+    }
+    
+    schematic::commands::GetComponentBoundsResponse response;
+    
+    // Get the screen
+    SCH_SHEET_PATH currentSheet = m_frame->GetCurrentSheet();
+    SCH_SCREEN* screen = currentSheet.LastScreen();
+    
+    if( !screen )
+    {
+        response.set_error( "No active schematic screen" );
+        return response;
+    }
+    
+    // Find the symbol with the given ID
+    KIID symbolId( aCtx.Request.symbol_id().value() );
+    SCH_SYMBOL* symbol = nullptr;
+    
+    for( SCH_ITEM* item : screen->Items() )
+    {
+        if( item->Type() == SCH_SYMBOL_T && item->m_Uuid == symbolId )
+        {
+            symbol = static_cast<SCH_SYMBOL*>( item );
+            break;
+        }
+    }
+    
+    if( !symbol )
+    {
+        response.set_error( "Symbol not found" );
+        return response;
+    }
+    
+    // Set symbol reference
+    response.set_reference( symbol->GetField( FIELD_T::REFERENCE )->GetText().ToStdString() );
+    
+    // Get bounding box based on request parameters
+    BOX2I bbox;
+    if( aCtx.Request.include_pins() && aCtx.Request.include_fields() )
+    {
+        // Use the full bounding box method that includes pins and fields
+        bbox = symbol->GetBoundingBox();
+    }
+    else if( aCtx.Request.include_pins() )
+    {
+        // Get body + pins bounding box (exclude fields)
+        bbox = symbol->GetBodyAndPinsBoundingBox();
+    }
+    else
+    {
+        // Get symbol body bounding box only (exclude pins and fields)
+        bbox = symbol->GetBodyBoundingBox();
+    }
+    
+    // Convert bounding box to response format
+    // Convert from KiCad schematic internal units to nanometers (1 schematic IU = 100 nm)
+    response.mutable_top_left()->set_x_nm( bbox.GetX() * 100 );
+    response.mutable_top_left()->set_y_nm( bbox.GetY() * 100 );
+    response.mutable_bottom_right()->set_x_nm( bbox.GetRight() * 100 );
+    response.mutable_bottom_right()->set_y_nm( bbox.GetBottom() * 100 );
+    
+    return response;
+}
+
+
+HANDLER_RESULT<schematic::commands::GetGridAnchorsResponse>
+API_HANDLER_SCH::handleGetGridAnchors( const HANDLER_CONTEXT<schematic::commands::GetGridAnchors>& aCtx )
+{
+    if( !validateDocument( aCtx.Request.schematic() ) )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "Invalid schematic document" );
+        return tl::unexpected( e );
+    }
+    
+    schematic::commands::GetGridAnchorsResponse response;
+    
+    // Get the screen
+    SCH_SHEET_PATH currentSheet = m_frame->GetCurrentSheet();
+    SCH_SCREEN* screen = currentSheet.LastScreen();
+    
+    if( !screen )
+    {
+        response.set_error( "No active schematic screen" );
+        return response;
+    }
+    
+    // Convert position from nanometers to internal units
+    VECTOR2I position( aCtx.Request.position().x_nm() / 100, aCtx.Request.position().y_nm() / 100 );
+    
+    // Create grid helper instance
+    EE_GRID_HELPER grid( m_frame->GetToolManager() );
+    
+    // Convert skip items to selection
+    SCH_SELECTION skipItems;
+    for( const auto& skipId : aCtx.Request.skip_items() )
+    {
+        KIID itemId( skipId.value() );
+        for( SCH_ITEM* item : screen->Items() )
+        {
+            if( item->m_Uuid == itemId )
+            {
+                skipItems.Add( item );
+                break;
+            }
+        }
+    }
+    
+    // Get best snap anchor
+    VECTOR2I snapPos = grid.BestSnapAnchor( position, GRID_WIRES, skipItems );
+    
+    // Create anchor for the best snap position
+    schematic::commands::GridAnchor* anchor = response.add_anchors();
+    anchor->mutable_position()->set_x_nm( snapPos.x * 100 );
+    anchor->mutable_position()->set_y_nm( snapPos.y * 100 );
+    anchor->set_type( "snap" );
+    anchor->set_distance( ( snapPos - position ).EuclideanNorm() * 100 );
+    
+    // Get grid position as well
+    VECTOR2I nearestGrid = grid.GetOrigin();
+    
+    schematic::commands::GridAnchor* gridAnchor = response.add_anchors();
+    gridAnchor->mutable_position()->set_x_nm( nearestGrid.x * 100 );
+    gridAnchor->mutable_position()->set_y_nm( nearestGrid.y * 100 );
+    gridAnchor->set_type( "grid" );
+    gridAnchor->set_distance( ( nearestGrid - position ).EuclideanNorm() * 100 );
+    
+    return response;
+}
+
+
+HANDLER_RESULT<schematic::commands::GetConnectionPointsResponse>
+API_HANDLER_SCH::handleGetConnectionPoints( const HANDLER_CONTEXT<schematic::commands::GetConnectionPoints>& aCtx )
+{
+    if( !validateDocument( aCtx.Request.schematic() ) )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "Invalid schematic document" );
+        return tl::unexpected( e );
+    }
+    
+    schematic::commands::GetConnectionPointsResponse response;
+    
+    // Get the screen
+    SCH_SHEET_PATH currentSheet = m_frame->GetCurrentSheet();
+    SCH_SCREEN* screen = currentSheet.LastScreen();
+    
+    if( !screen )
+    {
+        response.set_error( "No active schematic screen" );
+        return response;
+    }
+    
+    // Get all connection points from the screen
+    std::vector<VECTOR2I> connections = screen->GetConnections();
+    
+    // Convert and add connection points to response
+    for( const VECTOR2I& conn : connections )
+    {
+        // Convert from KiCad schematic internal units to nanometers (1 schematic IU = 100 nm)
+        kiapi::common::types::Vector2* connPoint = response.add_connections();
+        connPoint->set_x_nm( conn.x * 100 );
+        connPoint->set_y_nm( conn.y * 100 );
     }
     
     return response;
