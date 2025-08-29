@@ -30,6 +30,7 @@
 #include <sch_sheet_path.h>
 #include <sch_item.h>
 #include <sch_symbol.h>
+#include <symbol.h>
 #include <sch_label.h>
 #include <sch_junction.h>
 #include <sch_line.h>
@@ -496,13 +497,23 @@ API_HANDLER_SCH::handleGetSchematicItems( const HANDLER_CONTEXT<schematic::comma
             symbolMsg.set_body_style( symbol->GetBodyStyle() );
             
             // Get orientation and mirroring
-            int orientation = symbol->GetOrientation();
-            symbolMsg.mutable_orientation()->set_value_degrees( orientation );
+            // Fix: Use GetOrientationProp() to get actual rotation angle
+            // Previously this was returning encoded flags (0-5) as degrees
+            SYMBOL_ORIENTATION_PROP orientationProp = symbol->GetOrientationProp();
+            int degrees = 0;
+            switch( orientationProp )
+            {
+                case SYMBOL_ORIENTATION_PROP::SYMBOL_ANGLE_0:   degrees = 0;   break;
+                case SYMBOL_ORIENTATION_PROP::SYMBOL_ANGLE_90:  degrees = 90;  break;
+                case SYMBOL_ORIENTATION_PROP::SYMBOL_ANGLE_180: degrees = 180; break;
+                case SYMBOL_ORIENTATION_PROP::SYMBOL_ANGLE_270: degrees = 270; break;
+                default: degrees = 0; break;
+            }
+            symbolMsg.mutable_orientation()->set_value_degrees( degrees );
             
-            // Note: GetTransform() gives us the complete transform matrix
-            // For now, simplified mirroring detection
-            symbolMsg.set_mirrored_x( false );  // TODO: Extract from transform
-            symbolMsg.set_mirrored_y( false );  // TODO: Extract from transform
+            // Fix: Use actual mirror detection methods
+            symbolMsg.set_mirrored_x( symbol->GetMirrorX() );
+            symbolMsg.set_mirrored_y( symbol->GetMirrorY() );
             
             // Get pins with their positions
             std::vector<SCH_PIN*> pins = symbol->GetPins();
@@ -699,8 +710,8 @@ API_HANDLER_SCH::handleDrawWire( const HANDLER_CONTEXT<schematic::commands::Draw
         SCH_SELECTION selection;
         selection.Add( wirePtr );
         
-        lwbTool->AddJunctionsIfNeeded( &junctionCommit, &selection );
-        if( junctionCommit.HasChanges() )
+        int junctionsAdded = lwbTool->AddJunctionsIfNeeded( &junctionCommit, &selection );
+        if( junctionsAdded > 0 )
             junctionCommit.Push( _( "Add junctions via API" ) );
     }
     
