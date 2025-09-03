@@ -21,6 +21,8 @@
 #ifndef KICAD_API_HANDLER_SCH_H
 #define KICAD_API_HANDLER_SCH_H
 
+#include <google/protobuf/empty.pb.h>
+
 #include <api/api_handler_editor.h>
 #include <api/common/commands/editor_commands.pb.h>
 #include <api/schematic/schematic_commands.pb.h>
@@ -28,6 +30,7 @@
 
 using namespace kiapi;
 using namespace kiapi::common;
+using google::protobuf::Empty;
 
 class SCH_EDIT_FRAME;
 class SCH_ITEM;
@@ -68,6 +71,8 @@ private:
     HANDLER_RESULT<commands::GetOpenDocumentsResponse> handleGetOpenDocuments(
             const HANDLER_CONTEXT<commands::GetOpenDocuments>& aCtx );
 
+    HANDLER_RESULT<Empty> handleSaveDocument( const HANDLER_CONTEXT<commands::SaveDocument>& aCtx );
+
     // Proof of concept handlers
     HANDLER_RESULT<schematic::commands::SchematicInfoResponse> handleGetSchematicInfo(
             const HANDLER_CONTEXT<schematic::commands::GetSchematicInfo>& aCtx );
@@ -77,6 +82,9 @@ private:
     
     HANDLER_RESULT<schematic::commands::CreateSchematicItemsResponse> handleCreateSchematicItems(
             const HANDLER_CONTEXT<schematic::commands::CreateSchematicItems>& aCtx );
+    
+    HANDLER_RESULT<commands::DeleteItemsResponse> handleDeleteItems(
+            const HANDLER_CONTEXT<commands::DeleteItems>& aCtx );
     
     // Phase 1A handlers
     HANDLER_RESULT<schematic::commands::DrawWireResponse> handleDrawWire(
