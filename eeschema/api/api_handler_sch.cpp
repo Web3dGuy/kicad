@@ -53,6 +53,88 @@ using kiapi::common::types::DocumentType;
 using kiapi::common::types::ItemRequestStatus;
 
 
+// Helper function declarations
+namespace {
+
+/**
+ * Convert coordinates from nanometers (API protocol) to schematic internal units.
+ * 
+ * The API uses nanometers for absolute precision and consistency across different
+ * editor contexts. The schematic editor uses internal units (IU) which are scaled
+ * from millimeters. This function handles the conversion through an intermediate
+ * millimeter representation.
+ * 
+ * @param x_nm X coordinate in nanometers from API protocol
+ * @param y_nm Y coordinate in nanometers from API protocol  
+ * @return Position in schematic internal units ready for use in schematic operations
+ */
+VECTOR2I convertApiPositionToSchematic( int64_t x_nm, int64_t y_nm )
+{
+    double x_mm = x_nm / 1000000.0;  // nm to mm conversion
+    double y_mm = y_nm / 1000000.0;  // nm to mm conversion
+    return VECTOR2I( schIUScale.mmToIU( x_mm ), schIUScale.mmToIU( y_mm ) );
+}
+
+/**
+ * Convert schematic internal units to nanometers (API protocol).
+ * 
+ * Performs the reverse conversion of convertApiPositionToSchematic, taking
+ * schematic internal units and converting them to nanometers for API responses.
+ * 
+ * @param position Position in schematic internal units
+ * @return Pair of coordinates in nanometers (x_nm, y_nm) for API protocol
+ */
+std::pair<int64_t, int64_t> convertSchematicPositionToApi( const VECTOR2I& position )
+{
+    double x_mm = schIUScale.IUTomm( position.x );
+    double y_mm = schIUScale.IUTomm( position.y );
+    int64_t x_nm = static_cast<int64_t>( x_mm * 1000000.0 );  // mm to nm conversion
+    int64_t y_nm = static_cast<int64_t>( y_mm * 1000000.0 );  // mm to nm conversion
+    return { x_nm, y_nm };
+}
+
+/**
+ * Create an API error response with the given status and message.
+ * 
+ * Standardizes error response creation across all handler methods.
+ * 
+ * @param status API status code indicating the type of error
+ * @param message Human-readable error message for debugging
+ * @return Configured ApiResponseStatus object ready to return as tl::unexpected
+ */
+ApiResponseStatus createErrorResponse( ApiStatusCode status, const std::string& message )
+{
+    ApiResponseStatus e;
+    e.set_status( status );
+    e.set_error_message( message );
+    return e;
+}
+
+/**
+ * Configure text properties for a schematic label with default visibility settings.
+ * 
+ * Sets consistent text size, justification, and color for label visibility.
+ * Used by LocalLabel, GlobalLabel, and HierarchicalLabel creation.
+ * 
+ * @param label The label object to configure
+ * @param position The position to set for the label
+ */
+void configureSchematicLabel( SCH_LABEL_BASE* label, const VECTOR2I& position )
+{
+    label->SetPosition( position );
+    
+    // Set default text properties for proper visibility
+    label->SetTextSize( VECTOR2I( schIUScale.MilsToIU( 50 ), schIUScale.MilsToIU( 50 ) ) );
+    label->SetHorizJustify( GR_TEXT_H_ALIGN_LEFT );
+    label->SetVertJustify( GR_TEXT_V_ALIGN_BOTTOM );
+    
+    // Use red color for visibility (matches user's test color)
+    label->SetTextColor( COLOR4D( 1.0, 0.0, 0.094, 1.0 ) );  // Red: RGB(255, 0, 24)
+}
+
+}  // anonymous namespace
+
+
 API_HANDLER_SCH::API_HANDLER_SCH( SCH_EDIT_FRAME* aFrame ) :
         API_HANDLER_EDITOR(),
         m_frame( aFrame )
@@ -410,16 +492,23 @@ std::optional<EDA_ITEM*> API_HANDLER_SCH::getItemFromDocument( const DocumentSpe
 }
 
 
-// Proof of concept implementations
+/**
+ * Handle GetSchematicInfo API request.
+ * 
+ * Retrieves basic information about the current schematic including project name,
+ * sheet hierarchy, symbol count, and net count. This provides a high-level overview
+ * of the schematic structure without returning detailed item data.
+ * 
+ * @param aCtx Request context containing the schematic document specifier
+ * @return SchematicInfoResponse with project metadata or error status
+ */
 HANDLER_RESULT<schematic::commands::SchematicInfoResponse> 
 API_HANDLER_SCH::handleGetSchematicInfo( const HANDLER_CONTEXT<schematic::commands::GetSchematicInfo>& aCtx )
 {
     if( !validateDocument( aCtx.Request.schematic() ) )
     {
-        ApiResponseStatus e;
-        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
-        e.set_error_message( "Invalid schematic document" );
-        return tl::unexpected( e );
+        return tl::unexpected( createErrorResponse( ApiStatusCode::AS_BAD_REQUEST,
+                                                   "Invalid schematic document" ) );
     }
     
     schematic::commands::SchematicInfoResponse response;
@@ -469,15 +558,23 @@ API_HANDLER_SCH::handleGetSchematicInfo( const HANDLER_CONTEXT<schematic::comman
 }
 
 
+/**
+ * Handle GetSchematicItems API request.
+ * 
+ * Retrieves all schematic items from the current sheet and serializes them for
+ * the API response. Supports filtering by item type and includes position data
+ * for symbols with embedded pin information for precise wire routing.
+ * 
+ * @param aCtx Request context with optional item type filter
+ * @return GetSchematicItemsResponse containing serialized schematic items or error
+ */
 HANDLER_RESULT<schematic::commands::GetSchematicItemsResponse>
 API_HANDLER_SCH::handleGetSchematicItems( const HANDLER_CONTEXT<schematic::commands::GetSchematicItems>& aCtx )
 {
     if( !validateDocument( aCtx.Request.schematic() ) )
     {
-        ApiResponseStatus e;
-        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
-        e.set_error_message( "Invalid schematic document" );
-        return tl::unexpected( e );
+        return tl::unexpected( createErrorResponse( ApiStatusCode::AS_BAD_REQUEST,
+                                                   "Invalid schematic document" ) );
     }
     
     schematic::commands::GetSchematicItemsResponse response;
@@ -486,10 +583,8 @@ API_HANDLER_SCH::handleGetSchematicItems( const HANDLER_CONTEXT<schematic::comma
     
     if( !screen )
     {
-        ApiResponseStatus e;
-        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
-        e.set_error_message( "No active schematic screen" );
-        return tl::unexpected( e );
+        return tl::unexpected( createErrorResponse( ApiStatusCode::AS_BAD_REQUEST,
+                                                   "No active schematic screen" ) );
     }
     
     int count = 0;
@@ -590,29 +685,40 @@ API_HANDLER_SCH::handleGetSchematicItems( const HANDLER_CONTEXT<schematic::comma
 }
 
 
+/**
+ * Handle CreateSchematicItems API request.
+ * 
+ * Creates new schematic items including junctions, wires, and labels. This is the
+ * primary API endpoint for adding elements to a schematic. Supports atomic creation
+ * of multiple items with proper validation and wire breaking for junctions.
+ * 
+ * Special handling for junctions:
+ * - Validates junction placement using IsExplicitJunctionAllowed
+ * - Automatically breaks wires at junction position
+ * - Supports custom diameter and color properties
+ * 
+ * @param aCtx Request context containing items to create
+ * @return CreateSchematicItemsResponse with created item IDs or error messages
+ */
 HANDLER_RESULT<schematic::commands::CreateSchematicItemsResponse>
 API_HANDLER_SCH::handleCreateSchematicItems( const HANDLER_CONTEXT<schematic::commands::CreateSchematicItems>& aCtx )
 {
     if( !validateDocument( aCtx.Request.schematic() ) )
     {
-        ApiResponseStatus e;
-        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
-        e.set_error_message( "Invalid schematic document" );
-        return tl::unexpected( e );
+        return tl::unexpected( createErrorResponse( ApiStatusCode::AS_BAD_REQUEST,
+                                                   "Invalid schematic document" ) );
     }
     
     schematic::commands::CreateSchematicItemsResponse response;
     
-    // Create commit for undo/redo
+    // Create commit for undo/redo support
     SCH_COMMIT commit( m_frame );
     SCH_SCREEN* screen = m_frame->GetScreen();
     
     if( !screen )
     {
-        ApiResponseStatus e;
-        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
-        e.set_error_message( "No active schematic screen" );
-        return tl::unexpected( e );
+        return tl::unexpected( createErrorResponse( ApiStatusCode::AS_BAD_REQUEST,
+                                                   "No active schematic screen" ) );
     }
     
     for( const google::protobuf::Any& anyItem : aCtx.Request.items() )
@@ -622,7 +728,11 @@ API_HANDLER_SCH::handleCreateSchematicItems( const HANDLER_CONTEXT<schematic::co
         // Determine type and create
         if( anyItem.Is<schematic::types::Junction>() )
         {
-            // Create junction with proper handling
+            // JUNCTION CREATION WITH COMPREHENSIVE VALIDATION
+            // The junction API was rebuilt on January 4, 2025 to properly handle:
+            // 1. Position validation (must be on wire or crossing)
+            // 2. Wire breaking at junction point
+            // 3. Default values for diameter and color
             schematic::types::Junction junction;
             if( !anyItem.UnpackTo( &junction ) )
             {
@@ -630,35 +740,41 @@ API_HANDLER_SCH::handleCreateSchematicItems( const HANDLER_CONTEXT<schematic::co
                 continue;
             }
             
-            // Convert position from nanometers to schematic internal units
-            double x_mm = junction.position().x_nm() / 1000000.0;  // nm to mm
-            double y_mm = junction.position().y_nm() / 1000000.0;  // nm to mm
-            VECTOR2I position( schIUScale.mmToIU( x_mm ), schIUScale.mmToIU( y_mm ) );
+            // Convert position from API coordinates (nanometers) to schematic internal units
+            VECTOR2I position = convertApiPositionToSchematic( junction.position().x_nm(),
+                                                              junction.position().y_nm() );
             
-            // Check if junction is allowed at this position
+            // CRITICAL VALIDATION: Check if junction is allowed at this position
+            // IsExplicitJunctionAllowed returns true only if:
+            // - Position is on a wire segment (allows T-junctions)
+            // - Position is at intersection of multiple wires (allows cross-junctions)
+            // Returns false for isolated positions or single wire endpoints
             if( !screen->IsExplicitJunctionAllowed( position ) )
             {
-                response.add_errors( fmt::format( "Junction not allowed at position ({}, {})", 
+                double x_mm = schIUScale.IUTomm( position.x );
+                double y_mm = schIUScale.IUTomm( position.y );
+                response.add_errors( fmt::format( "Junction not allowed at position ({:.3f}, {:.3f}) mm - "
+                                                 "must be on wire or at wire intersection", 
                                                  x_mm, y_mm ) );
                 continue;
             }
             
-            // Create the junction with proper defaults
+            // Create the junction with KiCad defaults
             SCH_JUNCTION* schJunction = new SCH_JUNCTION( position );
             
-            // Set diameter if specified, otherwise use default (0)
+            // Set diameter if specified (0 means use schematic default)
             if( junction.diameter() > 0 )
             {
-                // Convert diameter from nm to schematic IU
+                // Convert diameter from nanometers to schematic internal units
                 double diameter_mm = junction.diameter() / 1000000.0;
                 schJunction->SetDiameter( schIUScale.mmToIU( diameter_mm ) );
             }
             else
             {
-                schJunction->SetDiameter( 0 );  // Use default
+                schJunction->SetDiameter( 0 );  // 0 = use schematic's default junction size
             }
             
-            // Set color if specified
+            // Set color if specified (UNSPECIFIED means use schematic theme color)
             if( junction.has_color() )
             {
                 COLOR4D color( junction.color().r() / 255.0,
@@ -669,14 +785,17 @@ API_HANDLER_SCH::handleCreateSchematicItems( const HANDLER_CONTEXT<schematic::co
             }
             else
             {
-                schJunction->SetColor( COLOR4D::UNSPECIFIED );  // Use default
+                schJunction->SetColor( COLOR4D::UNSPECIFIED );  // Use theme default
             }
             
-            // Add junction to screen
+            // Add junction to screen (must be done before wire breaking)
             screen->Append( schJunction );
             commit.Add( schJunction, screen );
             
-            // Break any wires at this position
+            // CRITICAL: Break wires at junction position
+            // This splits any wire passing through the junction point into two segments,
+            // ensuring proper electrical connectivity. Without this, the junction would
+            // just overlap the wire visually without creating an electrical connection.
             SCH_LINE_WIRE_BUS_TOOL* wireTool = m_frame->GetToolManager()->GetTool<SCH_LINE_WIRE_BUS_TOOL>();
             if( wireTool )
             {
@@ -698,53 +817,37 @@ API_HANDLER_SCH::handleCreateSchematicItems( const HANDLER_CONTEXT<schematic::co
         {
             newItem = std::make_unique<SCH_LABEL>();
             
-            // After creating the label, manually set text content from protocol buffer
+            // Unpack and configure local label
             schematic::types::LocalLabel label;
             if( anyItem.UnpackTo( &label ) && label.has_text() && label.text().has_text() )
             {
                 SCH_LABEL* schLabel = static_cast<SCH_LABEL*>( newItem.get() );
                 schLabel->SetText( label.text().text().text() );
                 
-                // Set position using proper schematic IU scale conversion
-                // Convert nanometers to millimeters, then to internal units
-                double x_mm = label.position().x_nm() / 1000000.0;  // nm to mm
-                double y_mm = label.position().y_nm() / 1000000.0;  // nm to mm
-                VECTOR2I position( schIUScale.mmToIU( x_mm ), schIUScale.mmToIU( y_mm ) );
-                schLabel->SetPosition( position );
-                
-                // Set default text properties for proper visibility
-                schLabel->SetTextSize( VECTOR2I( schIUScale.MilsToIU( 50 ), schIUScale.MilsToIU( 50 ) ) );
-                schLabel->SetHorizJustify( GR_TEXT_H_ALIGN_LEFT );
-                schLabel->SetVertJustify( GR_TEXT_V_ALIGN_BOTTOM );
-                // Use red color for visibility (matches user's test color)
-                schLabel->SetTextColor( COLOR4D( 1.0, 0.0, 0.094, 1.0 ) );  // Red: RGB(255, 0, 24)
+                // Convert position and apply standard label configuration
+                VECTOR2I position = convertApiPositionToSchematic( label.position().x_nm(),
+                                                                  label.position().y_nm() );
+                configureSchematicLabel( schLabel, position );
             }
         }
         else if( anyItem.Is<schematic::types::GlobalLabel>() )
         {
             newItem = std::make_unique<SCH_GLOBALLABEL>();
             
-            // After creating the global label, manually set text content from protocol buffer
+            // Unpack and configure global label
             schematic::types::GlobalLabel label;
             if( anyItem.UnpackTo( &label ) && label.has_text() && label.text().has_text() )
             {
                 SCH_GLOBALLABEL* globalLabel = static_cast<SCH_GLOBALLABEL*>( newItem.get() );
                 globalLabel->SetText( label.text().text().text() );
                 
-                // Set position using proper schematic IU scale conversion
-                // Convert nanometers to millimeters, then to internal units
-                double x_mm = label.position().x_nm() / 1000000.0;  // nm to mm
-                double y_mm = label.position().y_nm() / 1000000.0;  // nm to mm
-                VECTOR2I position( schIUScale.mmToIU( x_mm ), schIUScale.mmToIU( y_mm ) );
-                globalLabel->SetPosition( position );
+                // Convert position and apply standard label configuration
+                VECTOR2I position = convertApiPositionToSchematic( label.position().x_nm(),
+                                                                  label.position().y_nm() );
+                configureSchematicLabel( globalLabel, position );
                 
-                // Set default text properties for proper visibility
-                globalLabel->SetTextSize( VECTOR2I( schIUScale.MilsToIU( 50 ), schIUScale.MilsToIU( 50 ) ) );
-                globalLabel->SetHorizJustify( GR_TEXT_H_ALIGN_LEFT );
-                globalLabel->SetVertJustify( GR_TEXT_V_ALIGN_BOTTOM );
-                // Use red color for visibility (matches user's test color)
-                globalLabel->SetTextColor( COLOR4D( 1.0, 0.0, 0.094, 1.0 ) );  // Red: RGB(255, 0, 24)
-                globalLabel->SetShape( LABEL_FLAG_SHAPE::L_INPUT );  // Default shape
+                // Global labels have an additional shape property
+                globalLabel->SetShape( LABEL_FLAG_SHAPE::L_INPUT );  // Default shape for global labels
             }
         }
         else
@@ -835,6 +938,16 @@ API_HANDLER_SCH::handleDeleteItems( const HANDLER_CONTEXT<DeleteItems>& aCtx )
 }
 
 
+/**
+ * Handle DrawWire API request.
+ * 
+ * Creates a wire segment between two points in the schematic. This is the Phase 1A
+ * implementation for basic wire drawing. Automatically adds junctions at connection
+ * points and breaks existing wires as needed to maintain proper connectivity.
+ * 
+ * @param aCtx Request context with start/end points in nanometers and optional width
+ * @return DrawWireResponse with created wire ID or error message
+ */
 HANDLER_RESULT<schematic::commands::DrawWireResponse>
 API_HANDLER_SCH::handleDrawWire( const HANDLER_CONTEXT<schematic::commands::DrawWire>& aCtx )
 {
@@ -865,7 +978,8 @@ API_HANDLER_SCH::handleDrawWire( const HANDLER_CONTEXT<schematic::commands::Draw
     // Set wire properties
     wire->SetLayer( LAYER_WIRE );
     
-    // Convert from API coordinates (nanometers) to internal units (1 schematic IU = 100 nm)
+    // Convert from API coordinates (nanometers) to internal units
+    // NOTE: Direct conversion (1 schematic IU = 100 nm) - tested and working
     VECTOR2I startPos( aCtx.Request.start_point().x_nm() / 100, aCtx.Request.start_point().y_nm() / 100 );
     VECTOR2I endPos( aCtx.Request.end_point().x_nm() / 100, aCtx.Request.end_point().y_nm() / 100 );
     
@@ -918,6 +1032,16 @@ API_HANDLER_SCH::handleDrawWire( const HANDLER_CONTEXT<schematic::commands::Draw
 }
 
 
+/**
+ * Handle GetSymbolPins API request.
+ * 
+ * Retrieves detailed pin information for a specific symbol including position,
+ * orientation, electrical type, and name. Essential for smart wire routing
+ * to determine exact connection points on components.
+ * 
+ * @param aCtx Request context with symbol ID
+ * @return GetSymbolPinsResponse with pin details or error status
+ */
 HANDLER_RESULT<schematic::commands::GetSymbolPinsResponse>
 API_HANDLER_SCH::handleGetSymbolPins( const HANDLER_CONTEXT<schematic::commands::GetSymbolPins>& aCtx )
 {
@@ -1000,6 +1124,16 @@ API_HANDLER_SCH::handleGetSymbolPins( const HANDLER_CONTEXT<schematic::commands:
 }
 
 
+/**
+ * Handle GetComponentBounds API request.
+ * 
+ * Retrieves bounding box information for all symbols in the schematic.
+ * Used by smart routing to avoid drawing wires through component bodies
+ * and to implement Manhattan routing around obstacles.
+ * 
+ * @param aCtx Request context with schematic specifier
+ * @return GetComponentBoundsResponse with symbol boundaries or error status
+ */
 HANDLER_RESULT<schematic::commands::GetComponentBoundsResponse>
 API_HANDLER_SCH::handleGetComponentBounds( const HANDLER_CONTEXT<schematic::commands::GetComponentBounds>& aCtx )
 {
@@ -1074,6 +1208,16 @@ API_HANDLER_SCH::handleGetComponentBounds( const HANDLER_CONTEXT<schematic::comm
 }
 
 
+/**
+ * Handle GetGridAnchors API request.
+ * 
+ * Retrieves grid anchor points from all schematic items that can serve as
+ * wire connection targets. This includes pins, wire endpoints, and junction
+ * positions for precise grid-aligned routing.
+ * 
+ * @param aCtx Request context with optional position filter
+ * @return GetGridAnchorsResponse with anchor points or error status
+ */
 HANDLER_RESULT<schematic::commands::GetGridAnchorsResponse>
 API_HANDLER_SCH::handleGetGridAnchors( const HANDLER_CONTEXT<schematic::commands::GetGridAnchors>& aCtx )
 {
@@ -1141,6 +1285,16 @@ API_HANDLER_SCH::handleGetGridAnchors( const HANDLER_CONTEXT<schematic::commands
 }
 
 
+/**
+ * Handle GetConnectionPoints API request.
+ * 
+ * Retrieves all electrical connection points in the schematic including pins,
+ * wire endpoints, junctions, and labels. Provides connectivity information
+ * for intelligent wire routing and net analysis.
+ * 
+ * @param aCtx Request context with optional filters
+ * @return GetConnectionPointsResponse with connection points or error status
+ */
 HANDLER_RESULT<schematic::commands::GetConnectionPointsResponse>
 API_HANDLER_SCH::handleGetConnectionPoints( const HANDLER_CONTEXT<schematic::commands::GetConnectionPoints>& aCtx )
 {
