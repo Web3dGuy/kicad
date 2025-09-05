@@ -622,8 +622,71 @@ API_HANDLER_SCH::handleCreateSchematicItems( const HANDLER_CONTEXT<schematic::co
         // Determine type and create
         if( anyItem.Is<schematic::types::Junction>() )
         {
-            // TODO: Implement junction creation - currently disabled
-            // Junction API implementation needs to be rebuilt from scratch
+            // Create junction with proper handling
+            schematic::types::Junction junction;
+            if( !anyItem.UnpackTo( &junction ) )
+            {
+                response.add_errors( "Failed to unpack junction data" );
+                continue;
+            }
+            
+            // Convert position from nanometers to schematic internal units
+            double x_mm = junction.position().x_nm() / 1000000.0;  // nm to mm
+            double y_mm = junction.position().y_nm() / 1000000.0;  // nm to mm
+            VECTOR2I position( schIUScale.mmToIU( x_mm ), schIUScale.mmToIU( y_mm ) );
+            
+            // Check if junction is allowed at this position
+            if( !screen->IsExplicitJunctionAllowed( position ) )
+            {
+                response.add_errors( fmt::format( "Junction not allowed at position ({}, {})", 
+                                                 x_mm, y_mm ) );
+                continue;
+            }
+            
+            // Create the junction with proper defaults
+            SCH_JUNCTION* schJunction = new SCH_JUNCTION( position );
+            
+            // Set diameter if specified, otherwise use default (0)
+            if( junction.diameter() > 0 )
+            {
+                // Convert diameter from nm to schematic IU
+                double diameter_mm = junction.diameter() / 1000000.0;
+                schJunction->SetDiameter( schIUScale.mmToIU( diameter_mm ) );
+            }
+            else
+            {
+                schJunction->SetDiameter( 0 );  // Use default
+            }
+            
+            // Set color if specified
+            if( junction.has_color() )
+            {
+                COLOR4D color( junction.color().r() / 255.0,
+                              junction.color().g() / 255.0,
+                              junction.color().b() / 255.0,
+                              junction.color().a() / 255.0 );
+                schJunction->SetColor( color );
+            }
+            else
+            {
+                schJunction->SetColor( COLOR4D::UNSPECIFIED );  // Use default
+            }
+            
+            // Add junction to screen
+            screen->Append( schJunction );
+            commit.Add( schJunction, screen );
+            
+            // Break any wires at this position
+            SCH_LINE_WIRE_BUS_TOOL* wireTool = m_frame->GetToolManager()->GetTool<SCH_LINE_WIRE_BUS_TOOL>();
+            if( wireTool )
+            {
+                wireTool->BreakSegments( &commit, position, screen );
+            }
+            
+            // Add the created ID to response
+            kiapi::common::types::KIID* createdId = response.add_created_ids();
+            createdId->set_value( schJunction->m_Uuid.AsStdString() );
+            
             continue;
         }
         else if( anyItem.Is<schematic::types::Wire>() )
@@ -694,8 +757,7 @@ API_HANDLER_SCH::handleCreateSchematicItems( const HANDLER_CONTEXT<schematic::co
         if( newItem )
         {
             // Skip deserialize for manually handled items (they've already been configured)
-            bool skipDeserialize = anyItem.Is<schematic::types::Junction>() ||
-                                   anyItem.Is<schematic::types::LocalLabel>() ||
+            bool skipDeserialize = anyItem.Is<schematic::types::LocalLabel>() ||
                                    anyItem.Is<schematic::types::GlobalLabel>();
             
             if( !skipDeserialize )
