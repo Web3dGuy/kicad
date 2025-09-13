@@ -40,6 +40,7 @@
 #include <tool/tool_manager.h>
 #include <tools/sch_line_wire_bus_tool.h>
 #include <tools/sch_selection.h>
+#include <tools/sch_selection_tool.h>
 #include <tools/ee_grid_helper.h>
 
 #include <api/common/types/base_types.pb.h>
@@ -179,6 +180,22 @@ API_HANDLER_SCH::API_HANDLER_SCH( SCH_EDIT_FRAME* aFrame ) :
     registerHandler<schematic::commands::GetConnectionPoints,
                     schematic::commands::GetConnectionPointsResponse>(
             &API_HANDLER_SCH::handleGetConnectionPoints );
+    
+    // Selection Management System - Phase 1 Foundational Optimizations
+    registerHandler<schematic::commands::GetSelection,
+                    schematic::commands::SelectionResponse>(
+            &API_HANDLER_SCH::handleGetSelection );
+    
+    registerHandler<schematic::commands::ClearSelection, Empty>(
+            &API_HANDLER_SCH::handleClearSelection );
+    
+    registerHandler<schematic::commands::AddToSelection,
+                    schematic::commands::SelectionResponse>(
+            &API_HANDLER_SCH::handleAddToSelection );
+    
+    registerHandler<schematic::commands::RemoveFromSelection,
+                    schematic::commands::SelectionResponse>(
+            &API_HANDLER_SCH::handleRemoveFromSelection );
 }
 
 
@@ -1346,4 +1363,223 @@ HANDLER_RESULT<Empty> API_HANDLER_SCH::handleSaveDocument(
     m_frame->SaveProject();
     
     return Empty();
+}
+
+
+// Selection Management System Implementation - Phase 1 Foundational Optimizations
+
+HANDLER_RESULT<schematic::commands::SelectionResponse> API_HANDLER_SCH::handleGetSelection(
+        const HANDLER_CONTEXT<schematic::commands::GetSelection>& aCtx )
+{
+    /**
+     * Get currently selected schematic items.
+     * Integrates with SCH_SELECTION_TOOL to return active selection set.
+     */
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() );
+    
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+    
+    schematic::commands::SelectionResponse response;
+    
+    try
+    {
+        // Get the selection tool from the tool manager
+        TOOL_MANAGER* toolMgr = m_frame->GetToolManager();
+        if( !toolMgr )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_UNHANDLED );
+            return tl::unexpected( e );
+        }
+        
+        SCH_SELECTION_TOOL* selectionTool = toolMgr->GetTool<SCH_SELECTION_TOOL>();
+        if( !selectionTool )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_UNHANDLED );
+            return tl::unexpected( e );
+        }
+        
+        // Get current selection
+        SCH_SELECTION& selection = selectionTool->GetSelection();
+        
+        // Convert selection to protocol buffer format
+        // TODO: Implement item serialization based on item type
+        // This follows the same pattern as handleGetSchematicItems
+        for( EDA_ITEM* item : selection )
+        {
+            if( SCH_ITEM* schItem = dynamic_cast<SCH_ITEM*>( item ) )
+            {
+                (void)schItem; // Suppress unused variable warning for now
+                // google::protobuf::Any* anyItem = response.add_items();
+                // Item serialization will be implemented here
+            }
+        }
+        
+        response.set_selection_count( selection.GetSize() );
+        return response;
+    }
+    catch( const std::exception& ex )
+    {
+        ApiResponseStatus err;
+        err.set_status( ApiStatusCode::AS_UNHANDLED );
+        return tl::unexpected( err );
+    }
+}
+
+
+HANDLER_RESULT<Empty> API_HANDLER_SCH::handleClearSelection(
+        const HANDLER_CONTEXT<schematic::commands::ClearSelection>& aCtx )
+{
+    /**
+     * Clear current schematic selection.
+     */
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() );
+    
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+    
+    try
+    {
+        // Get the selection tool from the tool manager
+        TOOL_MANAGER* toolMgr = m_frame->GetToolManager();
+        if( !toolMgr )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_UNHANDLED );
+            return tl::unexpected( e );
+        }
+        
+        SCH_SELECTION_TOOL* selectionTool = toolMgr->GetTool<SCH_SELECTION_TOOL>();
+        if( !selectionTool )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_UNHANDLED );
+            return tl::unexpected( e );
+        }
+        
+        // Clear the selection
+        selectionTool->ClearSelection();
+        
+        return Empty();
+    }
+    catch( const std::exception& ex )
+    {
+        ApiResponseStatus err;
+        err.set_status( ApiStatusCode::AS_UNHANDLED );
+        return tl::unexpected( err );
+    }
+}
+
+
+HANDLER_RESULT<schematic::commands::SelectionResponse> API_HANDLER_SCH::handleAddToSelection(
+        const HANDLER_CONTEXT<schematic::commands::AddToSelection>& aCtx )
+{
+    /**
+     * Add items to current schematic selection.
+     */
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() );
+    
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+    
+    try
+    {
+        // Get the selection tool from the tool manager
+        TOOL_MANAGER* toolMgr = m_frame->GetToolManager();
+        if( !toolMgr )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_UNHANDLED );
+            return tl::unexpected( e );
+        }
+        
+        SCH_SELECTION_TOOL* selectionTool = toolMgr->GetTool<SCH_SELECTION_TOOL>();
+        if( !selectionTool )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_UNHANDLED );
+            return tl::unexpected( e );
+        }
+        
+        // Add items to selection by ID
+        for( const auto& kiid : aCtx.Request.item_ids() )
+        {
+            KIID itemId( kiid.value() );
+            std::optional<EDA_ITEM*> item = getItemFromDocument( aCtx.Request.schematic(), itemId );
+            
+            if( item.has_value() && *item )
+            {
+                selectionTool->AddItemToSel( *item );
+            }
+        }
+        
+        // Return updated selection status
+        schematic::commands::GetSelection getSelReq;
+        getSelReq.mutable_schematic()->CopyFrom( aCtx.Request.schematic() );
+        return handleGetSelection( { aCtx.ClientName, getSelReq } );
+    }
+    catch( const std::exception& ex )
+    {
+        ApiResponseStatus err;
+        err.set_status( ApiStatusCode::AS_UNHANDLED );
+        return tl::unexpected( err );
+    }
+}
+
+
+HANDLER_RESULT<schematic::commands::SelectionResponse> API_HANDLER_SCH::handleRemoveFromSelection(
+        const HANDLER_CONTEXT<schematic::commands::RemoveFromSelection>& aCtx )
+{
+    /**
+     * Remove items from current schematic selection.
+     */
+    HANDLER_RESULT<bool> documentValidation = validateDocument( aCtx.Request.schematic() );
+    
+    if( !documentValidation )
+        return tl::unexpected( documentValidation.error() );
+    
+    try
+    {
+        // Get the selection tool from the tool manager
+        TOOL_MANAGER* toolMgr = m_frame->GetToolManager();
+        if( !toolMgr )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_UNHANDLED );
+            return tl::unexpected( e );
+        }
+        
+        SCH_SELECTION_TOOL* selectionTool = toolMgr->GetTool<SCH_SELECTION_TOOL>();
+        if( !selectionTool )
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_UNHANDLED );
+            return tl::unexpected( e );
+        }
+        
+        // Remove items from selection by ID
+        for( const auto& kiid : aCtx.Request.item_ids() )
+        {
+            KIID itemId( kiid.value() );
+            std::optional<EDA_ITEM*> item = getItemFromDocument( aCtx.Request.schematic(), itemId );
+            
+            if( item.has_value() && *item )
+            {
+                selectionTool->RemoveItemFromSel( *item );
+            }
+        }
+        
+        // Return updated selection status
+        schematic::commands::GetSelection getSelReq;
+        getSelReq.mutable_schematic()->CopyFrom( aCtx.Request.schematic() );
+        return handleGetSelection( { aCtx.ClientName, getSelReq } );
+    }
+    catch( const std::exception& ex )
+    {
+        ApiResponseStatus err;
+        err.set_status( ApiStatusCode::AS_UNHANDLED );
+        return tl::unexpected( err );
+    }
 }

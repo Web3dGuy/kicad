@@ -134,3 +134,27 @@ message GetConnectionPointsResponse {
     repeated kiapi.common.types.Vector2 connections = 1;  // Available connection points
     string error = 2;  // Any error that occurred
 }
+
+// Selection Management System - Phase 1 Foundational Optimizations
+message GetSelection {
+    kiapi.common.types.DocumentSpecifier schematic = 1;
+}
+
+message SelectionResponse {
+    repeated google.protobuf.Any items = 1;
+    int32 selection_count = 2;
+}
+
+message AddToSelection {
+    kiapi.common.types.DocumentSpecifier schematic = 1;
+    repeated kiapi.common.types.KIID item_ids = 2;
+}
+
+message RemoveFromSelection {
+    kiapi.common.types.DocumentSpecifier schematic = 1;
+    repeated kiapi.common.types.KIID item_ids = 2;
+}
+
+message ClearSelection {
+    kiapi.common.types.DocumentSpecifier schematic = 1;
+}

@@ -102,6 +102,19 @@ private:
     HANDLER_RESULT<schematic::commands::GetConnectionPointsResponse> handleGetConnectionPoints(
             const HANDLER_CONTEXT<schematic::commands::GetConnectionPoints>& aCtx );
 
+    // Selection Management System - Phase 1 Foundational Optimizations
+    HANDLER_RESULT<schematic::commands::SelectionResponse> handleGetSelection(
+            const HANDLER_CONTEXT<schematic::commands::GetSelection>& aCtx );
+    
+    HANDLER_RESULT<Empty> handleClearSelection(
+            const HANDLER_CONTEXT<schematic::commands::ClearSelection>& aCtx );
+    
+    HANDLER_RESULT<schematic::commands::SelectionResponse> handleAddToSelection(
+            const HANDLER_CONTEXT<schematic::commands::AddToSelection>& aCtx );
+    
+    HANDLER_RESULT<schematic::commands::SelectionResponse> handleRemoveFromSelection(
+            const HANDLER_CONTEXT<schematic::commands::RemoveFromSelection>& aCtx );
+
     SCH_EDIT_FRAME* m_frame;
 };
 
