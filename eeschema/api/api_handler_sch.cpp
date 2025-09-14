@@ -503,8 +503,22 @@ std::optional<EDA_ITEM*> API_HANDLER_SCH::getItemFromDocument( const DocumentSpe
     if( !validateDocument( aDocument ) )
         return std::nullopt;
 
-    // TODO: Implement proper KIID-based item lookup
-    // For now, return nullopt to avoid compilation errors
+    // Get current schematic screen to search for items
+    SCH_SHEET_PATH currentSheet = m_frame->GetCurrentSheet();
+    SCH_SCREEN* screen = currentSheet.LastScreen();
+    
+    if( !screen )
+        return std::nullopt;
+    
+    // Search through all items on the screen for matching KIID
+    for( SCH_ITEM* item : screen->Items() )
+    {
+        if( item && item->m_Uuid == aId )
+        {
+            return static_cast<EDA_ITEM*>( item );
+        }
+    }
+    
     return std::nullopt;
 }
 
@@ -1503,7 +1517,9 @@ HANDLER_RESULT<schematic::commands::SelectionResponse> API_HANDLER_SCH::handleAd
             return tl::unexpected( e );
         }
         
-        // Add items to selection by ID
+        // Add items to selection by ID (using correct EDA_ITEMS type)
+        EDA_ITEMS toAdd;  // This is std::vector<EDA_ITEM*>
+        
         for( const auto& kiid : aCtx.Request.item_ids() )
         {
             KIID itemId( kiid.value() );
@@ -1511,8 +1527,15 @@ HANDLER_RESULT<schematic::commands::SelectionResponse> API_HANDLER_SCH::handleAd
             
             if( item.has_value() && *item )
             {
-                selectionTool->AddItemToSel( *item );
+                toAdd.emplace_back( *item );
             }
+        }
+        
+        // Add all items using the proper selection tool method
+        if( !toAdd.empty() )
+        {
+            selectionTool->AddItemsToSel( &toAdd );
+            m_frame->GetCanvas()->Refresh();
         }
         
         // Return updated selection status
