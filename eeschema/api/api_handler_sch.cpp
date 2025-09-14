@@ -1419,15 +1419,46 @@ HANDLER_RESULT<schematic::commands::SelectionResponse> API_HANDLER_SCH::handleGe
         SCH_SELECTION& selection = selectionTool->GetSelection();
         
         // Convert selection to protocol buffer format
-        // TODO: Implement item serialization based on item type
         // This follows the same pattern as handleGetSchematicItems
         for( EDA_ITEM* item : selection )
         {
             if( SCH_ITEM* schItem = dynamic_cast<SCH_ITEM*>( item ) )
             {
-                (void)schItem; // Suppress unused variable warning for now
-                // google::protobuf::Any* anyItem = response.add_items();
-                // Item serialization will be implemented here
+                google::protobuf::Any* any = nullptr;
+
+                // Handle different item types
+                if( schItem->Type() == SCH_JUNCTION_T ||
+                    schItem->Type() == SCH_LINE_T ||
+                    schItem->Type() == SCH_LABEL_T )
+                {
+                    any = response.add_items();
+                    schItem->Serialize( *any );
+                }
+                else if( schItem->Type() == SCH_SYMBOL_T )
+                {
+                    // Handle symbols specially - extract position and other data
+                    SCH_SYMBOL* symbol = static_cast<SCH_SYMBOL*>( schItem );
+
+                    // Create a Symbol protobuf message
+                    schematic::types::Symbol symbolMsg;
+
+                    // Set basic properties
+                    symbolMsg.mutable_id()->set_value( symbol->m_Uuid.AsStdString() );
+
+                    // Get position and convert from KiCad internal units to nanometers (1 IU = 100 nm)
+                    VECTOR2I pos = symbol->GetPosition();
+                    symbolMsg.mutable_position()->set_x_nm( pos.x * 100 );
+                    symbolMsg.mutable_position()->set_y_nm( pos.y * 100 );
+
+                    // Get reference and value fields
+                    symbolMsg.set_reference( symbol->GetField( FIELD_T::REFERENCE )->GetText().ToStdString() );
+                    symbolMsg.set_value( symbol->GetField( FIELD_T::VALUE )->GetText().ToStdString() );
+
+                    // Pack into Any and add to response
+                    any = response.add_items();
+                    any->PackFrom( symbolMsg );
+                }
+                // Add other item types as needed (labels, etc.)
             }
         }
         
