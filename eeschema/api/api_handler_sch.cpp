@@ -1773,12 +1773,6 @@ API_HANDLER_SCH::handlePlaceSymbol( const HANDLER_CONTEXT<schematic::commands::P
         if( aCtx.Request.mirrored_y() )
             symbol->MirrorVertically( position.y );
 
-        // Set reference if provided
-        if( !aCtx.Request.reference().empty() )
-        {
-            symbol->GetField( FIELD_T::REFERENCE )->SetText( aCtx.Request.reference() );
-        }
-
         // Set value if provided
         if( !aCtx.Request.value().empty() )
         {
@@ -1789,8 +1783,39 @@ API_HANDLER_SCH::handlePlaceSymbol( const HANDLER_CONTEXT<schematic::commands::P
         SCH_COMMIT commit( m_frame );
         commit.Add( symbol, screen );
 
-        // Auto-annotate if requested and no reference was provided
-        if( aCtx.Request.auto_annotate() && aCtx.Request.reference().empty() )
+        // Handle reference annotation
+        if( !aCtx.Request.reference().empty() )
+        {
+            // Manual reference provided - set it directly
+            symbol->GetField( FIELD_T::REFERENCE )->SetText( aCtx.Request.reference() );
+
+            // Only update annotation tracking for non-power symbols
+            // Power symbols (like GND, VCC) have special reference handling
+            if( !symbol->IsPower() )
+            {
+                // Update the annotation system to track this manual reference
+                // This ensures the reference is properly registered in KiCad's annotation system
+                SCH_SHEET_LIST hierarchy = m_frame->Schematic().Hierarchy();
+                SCH_REFERENCE_LIST refs;
+                hierarchy.GetSymbols( refs );
+
+                // Set the reference tracker from schematic settings
+                SCHEMATIC_SETTINGS& settings = m_frame->Schematic().Settings();
+                refs.SetRefDesTracker( settings.m_refDesTracker );
+
+                // Find our symbol and update its annotation
+                for( SCH_REFERENCE& ref : refs )
+                {
+                    if( ref.GetSymbol() == symbol )
+                    {
+                        ref.SetRef( aCtx.Request.reference() );
+                        break;
+                    }
+                }
+                refs.UpdateAnnotation();
+            }
+        }
+        else if( aCtx.Request.auto_annotate() )
         {
             // Get all existing references for collision detection
             SCH_SHEET_LIST hierarchy = m_frame->Schematic().Hierarchy();
@@ -1805,6 +1830,11 @@ API_HANDLER_SCH::handlePlaceSymbol( const HANDLER_CONTEXT<schematic::commands::P
 
             // Auto-annotate
             SCHEMATIC_SETTINGS& settings = m_frame->Schematic().Settings();
+
+            // CRITICAL: Set the reference tracker from schematic settings
+            // This prevents "No reference tracker set" errors
+            refs.SetRefDesTracker( settings.m_refDesTracker );
+
             refs.ReannotateByOptions(
                 (ANNOTATE_ORDER_T) settings.m_AnnotateSortOrder,
                 (ANNOTATE_ALGO_T) settings.m_AnnotateMethod,
@@ -1839,27 +1869,275 @@ API_HANDLER_SCH::handlePlaceSymbol( const HANDLER_CONTEXT<schematic::commands::P
 
 
 /**
- * Handle GetSymbolLibraries API request - STUB IMPLEMENTATION
- * TODO: Implement full library browsing functionality
+ * Handle GetSymbolLibraries API request
+ *
+ * Returns all available symbol libraries with metadata including symbol counts,
+ * descriptions, and power symbol filtering. This enables AI-driven library
+ * browsing and symbol discovery workflows.
  */
 HANDLER_RESULT<schematic::commands::GetSymbolLibrariesResponse>
 API_HANDLER_SCH::handleGetSymbolLibraries( const HANDLER_CONTEXT<schematic::commands::GetSymbolLibraries>& aCtx )
 {
+    if( !validateDocument( aCtx.Request.schematic() ) )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "Invalid schematic document" );
+        return tl::unexpected( e );
+    }
+
     schematic::commands::GetSymbolLibrariesResponse response;
-    response.set_error( "GetSymbolLibraries not yet implemented" );
+
+    try
+    {
+        // Get symbol library table from project
+        SYMBOL_LIB_TABLE* libs = PROJECT_SCH::SchSymbolLibTable( &m_frame->Prj() );
+        if( !libs )
+        {
+            response.set_error( "Symbol library table not available" );
+            return response;
+        }
+
+        // Get all available library names
+        std::vector<wxString> libraryNames = libs->GetLogicalLibs();
+
+        // Iterate through all available libraries
+        for( const wxString& libName : libraryNames )
+        {
+            try
+            {
+                // Get library metadata
+                SYMBOL_LIB_TABLE_ROW* libRow = libs->FindRow( libName );
+                if( !libRow )
+                    continue;
+
+                // Get all symbol names in this library
+                wxArrayString symbolNames;
+                libs->EnumerateSymbolLib( libName, symbolNames );
+
+                // Count symbols and check for power symbols
+                int totalSymbols = symbolNames.size();
+                bool isPowerLibrary = libName.Contains( "power" ) || libName.Contains( "Power" );
+                int powerSymbolCount = 0;
+
+                // If power_only filter is requested, check symbol types
+                if( aCtx.Request.power_symbols_only() || isPowerLibrary )
+                {
+                    for( const wxString& symbolName : symbolNames )
+                    {
+                        try
+                        {
+                            LIB_ID libId( libName, symbolName );
+                            LIB_SYMBOL* symbol = libs->LoadSymbol( libId );
+                            if( symbol && symbol->IsPower() )
+                                powerSymbolCount++;
+                        }
+                        catch( ... )
+                        {
+                            // Skip symbols that can't be loaded
+                            continue;
+                        }
+                    }
+                }
+
+                // Skip library if power_only filter is set and no power symbols found
+                if( aCtx.Request.power_symbols_only() && powerSymbolCount == 0 )
+                    continue;
+
+                // Create library response entry
+                schematic::commands::SymbolLibrary* library = response.add_libraries();
+                library->set_name( libName.ToStdString() );
+
+                // Set description (use library row info)
+                wxString description = wxString::Format( "KiCad Symbol Library (%s)", libRow->GetType() );
+                if( isPowerLibrary )
+                    description += " - Power Symbols";
+                library->set_description( description.ToStdString() );
+
+                // Set symbol count (total or power symbols based on filter)
+                if( aCtx.Request.power_symbols_only() )
+                    library->set_symbol_count( powerSymbolCount );
+                else
+                    library->set_symbol_count( totalSymbols );
+
+                library->set_is_power_library( isPowerLibrary );
+            }
+            catch( const std::exception& ex )
+            {
+                // Log library load error but continue with other libraries
+                wxLogDebug( "Failed to load library '%s': %s", libName, ex.what() );
+                continue;
+            }
+        }
+
+        // If no libraries found, set appropriate message
+        if( response.libraries_size() == 0 )
+        {
+            if( aCtx.Request.power_symbols_only() )
+                response.set_error( "No power symbol libraries found" );
+            else
+                response.set_error( "No symbol libraries available" );
+        }
+    }
+    catch( const std::exception& ex )
+    {
+        response.set_error( wxString::Format( "Error accessing symbol libraries: %s", ex.what() ).ToStdString() );
+    }
+
     return response;
 }
 
 
 /**
- * Handle SearchSymbols API request - STUB IMPLEMENTATION
- * TODO: Implement full symbol search functionality
+ * Handle SearchSymbols API request
+ *
+ * Searches through symbol libraries with text-based filtering on symbol names,
+ * descriptions, and keywords. Supports library filtering and power symbol detection
+ * for AI-driven symbol discovery workflows.
  */
 HANDLER_RESULT<schematic::commands::SearchSymbolsResponse>
 API_HANDLER_SCH::handleSearchSymbols( const HANDLER_CONTEXT<schematic::commands::SearchSymbols>& aCtx )
 {
+    if( !validateDocument( aCtx.Request.schematic() ) )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "Invalid schematic document" );
+        return tl::unexpected( e );
+    }
+
     schematic::commands::SearchSymbolsResponse response;
-    response.set_error( "SearchSymbols not yet implemented" );
+
+    try
+    {
+        // Get symbol library table from project
+        SYMBOL_LIB_TABLE* libs = PROJECT_SCH::SchSymbolLibTable( &m_frame->Prj() );
+        if( !libs )
+        {
+            response.set_error( "Symbol library table not available" );
+            return response;
+        }
+
+        const wxString searchText = aCtx.Request.search_text();
+        const bool powerOnly = aCtx.Request.power_symbols_only();
+        const int maxResults = aCtx.Request.max_results() > 0 ? aCtx.Request.max_results() : 50;
+        int resultCount = 0;
+
+        // Create set of libraries to search (empty means search all)
+        std::set<wxString> librariesToSearch;
+        for( const std::string& libName : aCtx.Request.libraries() )
+        {
+            librariesToSearch.insert( wxString::FromUTF8( libName ) );
+        }
+        bool searchAllLibraries = librariesToSearch.empty();
+
+        // Get all available library names
+        std::vector<wxString> libraryNames = libs->GetLogicalLibs();
+
+        // Iterate through all available libraries
+        for( const wxString& libName : libraryNames )
+        {
+            // Skip library if not in search list (when filtering by specific libraries)
+            if( !searchAllLibraries && librariesToSearch.find( libName ) == librariesToSearch.end() )
+                continue;
+
+            // Stop if we've reached the maximum results
+            if( resultCount >= maxResults )
+                break;
+
+            try
+            {
+                // Get all symbol names in this library
+                wxArrayString symbolNames;
+                libs->EnumerateSymbolLib( libName, symbolNames );
+
+                // Search through symbols in this library
+                for( const wxString& symbolName : symbolNames )
+                {
+                    if( resultCount >= maxResults )
+                        break;
+
+                    try
+                    {
+                        LIB_ID libId( libName, symbolName );
+                        LIB_SYMBOL* symbol = libs->LoadSymbol( libId );
+                        if( !symbol )
+                            continue;
+
+                        // Apply power symbol filter if requested
+                        bool isPowerSymbol = symbol->IsPower();
+                        if( powerOnly && !isPowerSymbol )
+                            continue;
+
+                        // Get symbol metadata for searching
+                        wxString description = symbol->GetDescription();
+                        wxString keywords = symbol->GetKeyWords();
+
+                        // Perform text search (case-insensitive)
+                        bool matches = false;
+                        if( searchText.empty() )
+                        {
+                            matches = true;  // Empty search returns all symbols
+                        }
+                        else
+                        {
+                            wxString searchLower = searchText.Lower();
+                            matches = symbolName.Lower().Contains( searchLower ) ||
+                                     description.Lower().Contains( searchLower ) ||
+                                     keywords.Lower().Contains( searchLower );
+                        }
+
+                        if( matches )
+                        {
+                            // Create search result entry
+                            schematic::commands::SymbolSearchResult* result = response.add_symbols();
+                            result->set_library_name( libName.ToStdString() );
+                            result->set_symbol_name( symbolName.ToStdString() );
+                            result->set_description( description.ToStdString() );
+                            result->set_keywords( keywords.ToStdString() );
+                            result->set_is_power_symbol( isPowerSymbol );
+                            result->set_unit_count( symbol->GetUnitCount() );
+
+                            resultCount++;
+                        }
+                    }
+                    catch( const std::exception& ex )
+                    {
+                        // Skip symbols that can't be loaded
+                        wxLogDebug( "Failed to load symbol '%s:%s': %s", libName, symbolName, ex.what() );
+                        continue;
+                    }
+                }
+            }
+            catch( const std::exception& ex )
+            {
+                // Log library load error but continue with other libraries
+                wxLogDebug( "Failed to search library '%s': %s", libName, ex.what() );
+                continue;
+            }
+        }
+
+        // Set appropriate message if no results found
+        if( response.symbols_size() == 0 )
+        {
+            if( searchText.empty() )
+            {
+                if( powerOnly )
+                    response.set_error( "No power symbols found in specified libraries" );
+                else
+                    response.set_error( "No symbols found in specified libraries" );
+            }
+            else
+            {
+                response.set_error( wxString::Format( "No symbols found matching search text '%s'", searchText ).ToStdString() );
+            }
+        }
+    }
+    catch( const std::exception& ex )
+    {
+        response.set_error( wxString::Format( "Error searching symbols: %s", ex.what() ).ToStdString() );
+    }
+
     return response;
 }
 
