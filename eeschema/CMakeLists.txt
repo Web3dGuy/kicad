@@ -474,6 +474,7 @@ if( KICAD_IPC_API )
     set( EESCHEMA_SRCS
         ${EESCHEMA_SRCS}
         api/api_handler_sch.cpp
+        api/api_sch_validation.cpp
     )
 endif()
 

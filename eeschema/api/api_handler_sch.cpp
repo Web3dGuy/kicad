@@ -21,6 +21,7 @@
 #include <api/api_handler_sch.h>
 #include <api/api_sch_utils.h>
 #include <api/api_utils.h>
+#include <api/api_sch_validation.h>
 #include <magic_enum.hpp>
 #include <sch_commit.h>
 #include <sch_edit_frame.h>
@@ -384,6 +385,21 @@ HANDLER_RESULT<ItemRequestStatus> API_HANDLER_SCH::handleCreateUpdateItemsIntern
             e.set_error_message( fmt::format( "could not unpack {} from request",
                                               item->GetClass().ToStdString() ) );
             return tl::unexpected( e );
+        }
+
+        // Section 5 Enhancement: Comprehensive C++ API layer validation
+        // Validate deserialized item data before KiCad operations to prevent silent corruption
+        if( SCH_ITEM* schItem = dynamic_cast<SCH_ITEM*>( item.get() ) )
+        {
+            auto validationResult = API_SCH_VALIDATION::ItemValidator::ValidateSchematicItem( schItem );
+            if( validationResult )
+            {
+                status.set_code( ItemStatusCode::ISC_INVALID_DATA );
+                status.set_error_message( fmt::format( "Validation failed: {}",
+                    API_SCH_VALIDATION::ErrorFormatter::FormatValidationError( *validationResult ) ) );
+                aItemHandler( status, anyItem );
+                continue;
+            }
         }
 
         if( aCreate && itemUuidMap.count( item->m_Uuid ) )
