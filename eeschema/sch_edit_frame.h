@@ -185,6 +185,12 @@ public:
     SEVERITY GetSeverity( int aErrorCode ) const override;
 
     /**
+     * Check if the frame can accept API commands.
+     * @return true if API commands can be processed safely
+     */
+    bool CanAcceptApiCommands() override;
+
+    /**
      * Return a human-readable description of the current screen.
      */
     wxString GetScreenDesc() const override;

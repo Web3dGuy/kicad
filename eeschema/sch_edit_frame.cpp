@@ -86,6 +86,7 @@
 #include <tools/sch_line_wire_bus_tool.h>
 #include <tools/sch_move_tool.h>
 #include <tools/sch_navigate_tool.h>
+#include <tools/sch_selection_tool.h>
 #include <tools/sch_find_replace_tool.h>
 #include <unordered_set>
 #include <view/view_controls.h>
@@ -1134,6 +1135,16 @@ void SCH_EDIT_FRAME::FocusSearch()
 SEVERITY SCH_EDIT_FRAME::GetSeverity( int aErrorCode ) const
 {
     return Schematic().ErcSettings().GetSeverity( aErrorCode );
+}
+
+
+bool SCH_EDIT_FRAME::CanAcceptApiCommands()
+{
+    // For now, be conservative: Don't allow any API use while the user is changing things
+    if( GetToolManager()->GetCurrentTool() != GetToolManager()->GetTool<SCH_SELECTION_TOOL>() )
+        return false;
+
+    return EDA_BASE_FRAME::CanAcceptApiCommands();
 }
 
 
