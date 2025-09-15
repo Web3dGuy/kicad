@@ -37,6 +37,9 @@
 #include <sch_line.h>
 #include <sch_pin.h>
 #include <sch_field.h>
+#include <symbol_library.h>
+#include <project_sch.h>
+#include <symbol_lib_table.h>
 #include <wx/filename.h>
 #include <tool/tool_manager.h>
 #include <tools/sch_line_wire_bus_tool.h>
@@ -169,7 +172,20 @@ API_HANDLER_SCH::API_HANDLER_SCH( SCH_EDIT_FRAME* aFrame ) :
     registerHandler<schematic::commands::GetSymbolPins,
                     schematic::commands::GetSymbolPinsResponse>(
             &API_HANDLER_SCH::handleGetSymbolPins );
-    
+
+    // Symbol Placement System - Phase 2 Handler Registration
+    registerHandler<schematic::commands::GetSymbolLibraries,
+                    schematic::commands::GetSymbolLibrariesResponse>(
+            &API_HANDLER_SCH::handleGetSymbolLibraries );
+
+    registerHandler<schematic::commands::SearchSymbols,
+                    schematic::commands::SearchSymbolsResponse>(
+            &API_HANDLER_SCH::handleSearchSymbols );
+
+    registerHandler<schematic::commands::PlaceSymbol,
+                    schematic::commands::PlaceSymbolResponse>(
+            &API_HANDLER_SCH::handlePlaceSymbol );
+
     registerHandler<schematic::commands::GetComponentBounds,
                     schematic::commands::GetComponentBoundsResponse>(
             &API_HANDLER_SCH::handleGetComponentBounds );
@@ -1653,3 +1669,197 @@ HANDLER_RESULT<schematic::commands::SelectionResponse> API_HANDLER_SCH::handleRe
         return tl::unexpected( err );
     }
 }
+
+
+/**
+ * Handle PlaceSymbol API request.
+ *
+ * Places a symbol from a library at a specified position with given properties.
+ * This replicates the core functionality of SCH_DRAWING_TOOLS::PlaceSymbol()
+ * but with direct library/symbol specification instead of interactive dialog.
+ *
+ * @param aCtx Request context with placement parameters
+ * @return PlaceSymbolResponse with symbol ID and assigned reference or error
+ */
+HANDLER_RESULT<schematic::commands::PlaceSymbolResponse>
+API_HANDLER_SCH::handlePlaceSymbol( const HANDLER_CONTEXT<schematic::commands::PlaceSymbol>& aCtx )
+{
+    if( !validateDocument( aCtx.Request.schematic() ) )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( "Invalid schematic document" );
+        return tl::unexpected( e );
+    }
+
+    schematic::commands::PlaceSymbolResponse response;
+
+    try
+    {
+        // Get current sheet and screen
+        SCH_SHEET_PATH currentSheet = m_frame->GetCurrentSheet();
+        SCH_SCREEN* screen = currentSheet.LastScreen();
+
+        if( !screen )
+        {
+            response.set_error( "No active schematic screen" );
+            return response;
+        }
+
+        // Get symbol library table and lookup the symbol
+        SYMBOL_LIB_TABLE* libs = PROJECT_SCH::SchSymbolLibTable( &m_frame->Prj() );
+        if( !libs )
+        {
+            response.set_error( "Symbol library table not available" );
+            return response;
+        }
+
+        // Create library ID from library and symbol names
+        LIB_ID libId( aCtx.Request.library_name(), aCtx.Request.symbol_name() );
+
+        // Get the library symbol
+        LIB_SYMBOL* libSymbol = nullptr;
+        try
+        {
+            libSymbol = libs->LoadSymbol( libId );
+        }
+        catch( const std::exception& ex )
+        {
+            response.set_error( wxString::Format( "Failed to load symbol '%s:%s': %s",
+                                                 aCtx.Request.library_name(),
+                                                 aCtx.Request.symbol_name(),
+                                                 ex.what() ).ToStdString() );
+            return response;
+        }
+
+        if( !libSymbol )
+        {
+            response.set_error( wxString::Format( "Symbol '%s:%s' not found",
+                                                 aCtx.Request.library_name(),
+                                                 aCtx.Request.symbol_name() ).ToStdString() );
+            return response;
+        }
+
+        // Set unit number for multi-unit symbols
+        int unit = aCtx.Request.unit();
+        if( unit <= 0 ) unit = 1;  // Default to unit 1
+
+        // Convert position from nanometers to internal units
+        VECTOR2I position = convertApiPositionToSchematic(
+            aCtx.Request.position().x_nm(),
+            aCtx.Request.position().y_nm()
+        );
+
+        // Create schematic symbol instance with correct parameters
+        SCH_SYMBOL* symbol = new SCH_SYMBOL( *libSymbol, libId, &currentSheet, unit, 0, position );
+
+        // Set orientation (rotation) - SetOrientation expects int, not EDA_ANGLE
+        if( aCtx.Request.orientation() != 0 )
+        {
+            int orientation = aCtx.Request.orientation();
+            // Convert degrees to KiCad orientation enum
+            // 0 = 0°, 1 = 90°, 2 = 180°, 3 = 270°
+            int kiCadOrientation = 0;
+            if( orientation == 90 ) kiCadOrientation = 1;
+            else if( orientation == 180 ) kiCadOrientation = 2;
+            else if( orientation == 270 ) kiCadOrientation = 3;
+
+            symbol->SetOrientation( kiCadOrientation );
+        }
+
+        // Set mirrors
+        if( aCtx.Request.mirrored_x() )
+            symbol->MirrorHorizontally( position.x );
+        if( aCtx.Request.mirrored_y() )
+            symbol->MirrorVertically( position.y );
+
+        // Set reference if provided
+        if( !aCtx.Request.reference().empty() )
+        {
+            symbol->GetField( FIELD_T::REFERENCE )->SetText( aCtx.Request.reference() );
+        }
+
+        // Set value if provided
+        if( !aCtx.Request.value().empty() )
+        {
+            symbol->GetField( FIELD_T::VALUE )->SetText( aCtx.Request.value() );
+        }
+
+        // Add symbol to screen using commit for proper undo/redo
+        SCH_COMMIT commit( m_frame );
+        commit.Add( symbol, screen );
+
+        // Auto-annotate if requested and no reference was provided
+        if( aCtx.Request.auto_annotate() && aCtx.Request.reference().empty() )
+        {
+            // Get all existing references for collision detection
+            SCH_SHEET_LIST hierarchy = m_frame->Schematic().Hierarchy();
+            SCH_REFERENCE_LIST existingRefs;
+            hierarchy.GetSymbols( existingRefs );
+            existingRefs.SortByReferenceOnly();
+
+            // Create reference for this symbol
+            SCH_REFERENCE newReference( symbol, currentSheet );
+            SCH_REFERENCE_LIST refs;
+            refs.AddItem( newReference );
+
+            // Auto-annotate
+            SCHEMATIC_SETTINGS& settings = m_frame->Schematic().Settings();
+            refs.ReannotateByOptions(
+                (ANNOTATE_ORDER_T) settings.m_AnnotateSortOrder,
+                (ANNOTATE_ALGO_T) settings.m_AnnotateMethod,
+                settings.m_AnnotateStartNum,
+                existingRefs,
+                false,
+                &hierarchy
+            );
+
+            refs.UpdateAnnotation();
+        }
+
+        // Commit the changes
+        commit.Push( "Place symbol" );
+
+        // Refresh view
+        m_frame->GetCanvas()->Refresh();
+
+        // Return success response
+        response.mutable_symbol_id()->set_value( symbol->m_Uuid.AsString().ToStdString() );
+        response.set_assigned_reference( symbol->GetField( FIELD_T::REFERENCE )->GetText().ToStdString() );
+
+        return response;
+    }
+    catch( const std::exception& ex )
+    {
+        response.set_error( wxString::Format( "Error placing symbol: %s", ex.what() ).ToStdString() );
+        return response;
+    }
+}
+
+
+
+/**
+ * Handle GetSymbolLibraries API request - STUB IMPLEMENTATION
+ * TODO: Implement full library browsing functionality
+ */
+HANDLER_RESULT<schematic::commands::GetSymbolLibrariesResponse>
+API_HANDLER_SCH::handleGetSymbolLibraries( const HANDLER_CONTEXT<schematic::commands::GetSymbolLibraries>& aCtx )
+{
+    schematic::commands::GetSymbolLibrariesResponse response;
+    response.set_error( "GetSymbolLibraries not yet implemented" );
+    return response;
+}
+
+
+/**
+ * Handle SearchSymbols API request - STUB IMPLEMENTATION
+ * TODO: Implement full symbol search functionality
+ */
+HANDLER_RESULT<schematic::commands::SearchSymbolsResponse>
+API_HANDLER_SCH::handleSearchSymbols( const HANDLER_CONTEXT<schematic::commands::SearchSymbols>& aCtx )
+{
+    schematic::commands::SearchSymbolsResponse response;
+    response.set_error( "SearchSymbols not yet implemented" );
+    return response;
+}
+

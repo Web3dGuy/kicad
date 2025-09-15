@@ -92,7 +92,17 @@ private:
     
     HANDLER_RESULT<schematic::commands::GetSymbolPinsResponse> handleGetSymbolPins(
             const HANDLER_CONTEXT<schematic::commands::GetSymbolPins>& aCtx );
-    
+
+    // Symbol Placement System - Phase 2 API Handlers
+    HANDLER_RESULT<schematic::commands::GetSymbolLibrariesResponse> handleGetSymbolLibraries(
+            const HANDLER_CONTEXT<schematic::commands::GetSymbolLibraries>& aCtx );
+
+    HANDLER_RESULT<schematic::commands::SearchSymbolsResponse> handleSearchSymbols(
+            const HANDLER_CONTEXT<schematic::commands::SearchSymbols>& aCtx );
+
+    HANDLER_RESULT<schematic::commands::PlaceSymbolResponse> handlePlaceSymbol(
+            const HANDLER_CONTEXT<schematic::commands::PlaceSymbol>& aCtx );
+
     HANDLER_RESULT<schematic::commands::GetComponentBoundsResponse> handleGetComponentBounds(
             const HANDLER_CONTEXT<schematic::commands::GetComponentBounds>& aCtx );
     
