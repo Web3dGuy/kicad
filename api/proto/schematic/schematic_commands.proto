@@ -222,3 +222,41 @@ message PlaceSymbolResponse {
     string assigned_reference = 2;          // Final reference after annotation
     string error = 3;
 }
+
+// Library preloading and management
+message PreloadSymbolLibraries {
+    kiapi.common.types.DocumentSpecifier schematic = 1;
+    repeated string library_names = 2;  // Specific libraries to preload (empty = all)
+    bool force_reload = 3;              // Force reload even if already loaded
+}
+
+message PreloadSymbolLibrariesResponse {
+    int32 loaded_libraries = 1;         // Number of libraries loaded
+    repeated string failed_libraries = 2; // Libraries that failed to load
+    double loading_time_seconds = 3;    // Time taken to load
+    string error = 4;
+}
+
+message GetLibraryLoadStatus {
+    kiapi.common.types.DocumentSpecifier schematic = 1;
+}
+
+message GetLibraryLoadStatusResponse {
+    bool symbols_loaded = 1;             // Symbol libraries loaded status
+    bool footprints_loaded = 2;          // Footprint libraries loaded status
+    int32 symbol_library_count = 3;     // Number of symbol libraries
+    int32 footprint_library_count = 4;  // Number of footprint libraries
+    repeated string loaded_symbol_libraries = 5;  // Names of loaded symbol libraries
+}
+
+message RefreshSymbolLibraries {
+    kiapi.common.types.DocumentSpecifier schematic = 1;
+    repeated string library_names = 2;  // Specific libraries to refresh (empty = all)
+}
+
+message RefreshSymbolLibrariesResponse {
+    int32 refreshed_libraries = 1;      // Number of libraries refreshed
+    repeated string failed_libraries = 2; // Libraries that failed to refresh
+    double refresh_time_seconds = 3;    // Time taken to refresh
+    string error = 4;
+}

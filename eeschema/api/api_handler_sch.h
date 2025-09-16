@@ -103,6 +103,16 @@ private:
     HANDLER_RESULT<schematic::commands::PlaceSymbolResponse> handlePlaceSymbol(
             const HANDLER_CONTEXT<schematic::commands::PlaceSymbol>& aCtx );
 
+    // Library Management APIs - Preloading and refresh support
+    HANDLER_RESULT<schematic::commands::PreloadSymbolLibrariesResponse> handlePreloadSymbolLibraries(
+            const HANDLER_CONTEXT<schematic::commands::PreloadSymbolLibraries>& aCtx );
+
+    HANDLER_RESULT<schematic::commands::GetLibraryLoadStatusResponse> handleGetLibraryLoadStatus(
+            const HANDLER_CONTEXT<schematic::commands::GetLibraryLoadStatus>& aCtx );
+
+    HANDLER_RESULT<schematic::commands::RefreshSymbolLibrariesResponse> handleRefreshSymbolLibraries(
+            const HANDLER_CONTEXT<schematic::commands::RefreshSymbolLibraries>& aCtx );
+
     HANDLER_RESULT<schematic::commands::GetComponentBoundsResponse> handleGetComponentBounds(
             const HANDLER_CONTEXT<schematic::commands::GetComponentBounds>& aCtx );
     
