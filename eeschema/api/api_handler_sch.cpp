@@ -23,6 +23,7 @@
 #include <api/api_utils.h>
 #include <api/api_sch_validation.h>
 #include <magic_enum.hpp>
+#include <refdes_utils.h>
 #include <sch_commit.h>
 #include <sch_edit_frame.h>
 #include <schematic.h>
@@ -1817,38 +1818,51 @@ API_HANDLER_SCH::handlePlaceSymbol( const HANDLER_CONTEXT<schematic::commands::P
         }
         else if( aCtx.Request.auto_annotate() )
         {
-            // Get all existing references for collision detection
-            SCH_SHEET_LIST hierarchy = m_frame->Schematic().Hierarchy();
-            SCH_REFERENCE_LIST existingRefs;
-            hierarchy.GetSymbols( existingRefs );
-            existingRefs.SortByReferenceOnly();
+            // Set the symbol to have an unannotated reference initially
+            // This will be corrected by the annotation system after commit
+            wxString prefix = libSymbol->GetReferenceField().GetText();
+            if( prefix.IsEmpty() )
+                prefix = "U";
 
-            // Create reference for this symbol
-            SCH_REFERENCE newReference( symbol, currentSheet );
-            SCH_REFERENCE_LIST refs;
-            refs.AddItem( newReference );
+            prefix = UTIL::GetRefDesPrefix( prefix );
+            if( prefix.IsEmpty() )
+                prefix = "U";
 
-            // Auto-annotate
-            SCHEMATIC_SETTINGS& settings = m_frame->Schematic().Settings();
-
-            // CRITICAL: Set the reference tracker from schematic settings
-            // This prevents "No reference tracker set" errors
-            refs.SetRefDesTracker( settings.m_refDesTracker );
-
-            refs.ReannotateByOptions(
-                (ANNOTATE_ORDER_T) settings.m_AnnotateSortOrder,
-                (ANNOTATE_ALGO_T) settings.m_AnnotateMethod,
-                settings.m_AnnotateStartNum,
-                existingRefs,
-                false,
-                &hierarchy
-            );
-
-            refs.UpdateAnnotation();
+            wxString unannotatedRef = UTIL::GetRefDesUnannotated( prefix );
+            symbol->GetField( FIELD_T::REFERENCE )->SetText( unannotatedRef );
         }
 
         // Commit the changes
         commit.Push( "Place symbol" );
+
+        // Handle auto-annotation AFTER the symbol is committed to the schematic
+        if( aCtx.Request.auto_annotate() && !symbol->IsPower() )
+        {
+            // Create a separate commit for annotation changes
+            SCH_COMMIT annotationCommit( m_frame );
+
+            // Create a reference list with just this symbol
+            SCH_REFERENCE_LIST newSymbolRefs;
+            SCH_REFERENCE newRef( symbol, currentSheet );
+            newSymbolRefs.AddItem( newRef );
+
+            // Get all existing symbols for collision detection
+            SCH_SHEET_LIST hierarchy = m_frame->Schematic().Hierarchy();
+            SCH_REFERENCE_LIST allRefs;
+            hierarchy.GetSymbols( allRefs );
+
+            // Set up annotation system
+            SCHEMATIC_SETTINGS& settings = m_frame->Schematic().Settings();
+            newSymbolRefs.SetRefDesTracker( settings.m_refDesTracker );
+
+            // Use ReannotateDuplicates to assign proper number
+            newSymbolRefs.ReannotateDuplicates( allRefs );
+            newSymbolRefs.UpdateAnnotation();
+
+            // Mark the symbol as modified for proper UI update
+            annotationCommit.Modify( symbol, screen );
+            annotationCommit.Push( "Auto-annotate symbol" );
+        }
 
         // Refresh view
         m_frame->GetCanvas()->Refresh();
