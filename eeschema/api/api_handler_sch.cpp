@@ -1760,10 +1760,15 @@ API_HANDLER_SCH::handlePlaceSymbol( const HANDLER_CONTEXT<schematic::commands::P
         if( unit <= 0 ) unit = 1;  // Default to unit 1
 
         // Convert position from nanometers to internal units
-        VECTOR2I position = convertApiPositionToSchematic(
+        VECTOR2I requestedPosition = convertApiPositionToSchematic(
             aCtx.Request.position().x_nm(),
             aCtx.Request.position().y_nm()
         );
+
+        // Grid-align the position for proper pin connectivity
+        // Use EE_GRID_HELPER to snap to the connectable grid like the interactive tool does
+        EE_GRID_HELPER grid( m_frame->GetToolManager() );
+        VECTOR2I position = grid.Align( requestedPosition, GRID_HELPER_GRIDS::GRID_CONNECTABLE );
 
         // Create schematic symbol instance with correct parameters
         SCH_SYMBOL* symbol = new SCH_SYMBOL( *libSymbol, libId, &currentSheet, unit, 0, position );
